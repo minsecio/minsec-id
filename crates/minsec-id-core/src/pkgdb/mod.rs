@@ -10,6 +10,7 @@ use crate::digest::Algo;
 use crate::host::{Canon, Host};
 
 mod dpkg;
+mod ostree;
 mod rpm;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -17,6 +18,8 @@ mod rpm;
 pub enum Manager {
     Rpm,
     Dpkg,
+    /// The booted commit of an ostree system.
+    Ostree,
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +206,12 @@ impl PkgDb {
         if has_dpkg(host) {
             dpkg::load(host, &mut b)?;
             b.db.managers.push(Manager::Dpkg);
+        }
+        if host.exists("/run/ostree-booted") {
+            match ostree::load(host, &mut b) {
+                Ok(()) => b.db.managers.push(Manager::Ostree),
+                Err(e) => b.warn(format!("ostree: {e:#}")),
+            }
         }
         let db = b.finish();
         // Loading churned through transient allocations; hand them back.

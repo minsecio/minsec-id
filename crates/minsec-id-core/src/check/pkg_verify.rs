@@ -285,6 +285,9 @@ impl Check for PkgVerify {
     }
 
     fn unavailable(&self, host: &Host) -> Option<String> {
+        if super::ostree_host::is_ostree(host) {
+            return Some("an ostree system: ostree-verify checks /usr against the deployed commit".into());
+        }
         (!crate::pkgdb::has_rpm(host) && !crate::pkgdb::has_dpkg(host)).then(|| "no rpm or dpkg database".into())
     }
 

@@ -17,12 +17,14 @@ mod accounts;
 mod antiforensics;
 mod boot;
 pub(crate) mod bpf_progs;
+mod checkout;
 mod exe_unowned;
 mod flatpak;
 mod ftrace;
 mod kernel_tainted;
 pub(crate) mod kmod;
 mod net;
+pub(crate) mod ostree_host;
 pub(crate) mod persistence;
 pub(crate) mod pkg_verify;
 pub(crate) mod proc_exe;
@@ -178,6 +180,8 @@ static ALL: &[&dyn Check] = &[
     &flatpak::FlatpakVerify,
     &snap::SnapMounts,
     &snap::SnapVerify,
+    &ostree_host::OstreeDeployment,
+    &ostree_host::OstreeVerify,
     &exe_unowned::ExeUnowned,
     &repos::RepoKeys,
     &repos::Repos,

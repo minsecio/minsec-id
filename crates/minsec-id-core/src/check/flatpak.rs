@@ -21,12 +21,13 @@
 //! (`export/`) are rewritten by flatpak on deployment and are not compared.
 //! Per-user installations are writable by their user and are not checked.
 
-use super::pkg_verify::{load_verified, path_hash, save_verified};
+use super::checkout::{Checkout, Verifier};
+use super::pkg_verify::{load_verified, save_verified};
 use super::{Anchors, Check, Cost, Ctx, Unavailable};
 use crate::finding::{Finding, Severity};
 use crate::host::Host;
 use crate::ostree::{self, Csum, Gv, Repo};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -148,243 +149,12 @@ fn placeholder(rel: &str, path: &Path) -> bool {
     }
 }
 
-fn severity_for(rel: &str, mode: u32) -> Severity {
-    let code = ["files/bin/", "files/lib", "files/libexec/", "files/sbin/"]
-        .iter()
-        .any(|p| rel.starts_with(p));
-    if code || mode & 0o111 != 0 {
-        Severity::High
-    } else {
-        Severity::Medium
-    }
-}
-
-fn key(c: &Csum) -> u64 {
-    u64::from_le_bytes(c[..8].try_into().unwrap())
-}
-
-struct Run<'a> {
-    repo: &'a Repo,
-    /// The newest deployment: objects changed after it are hashed.
-    since: i64,
-    sample_days: u64,
-    today: u64,
-    verified: HashMap<u64, i64>,
-    next_verified: HashMap<u64, i64>,
-    /// Objects already judged this run: shared by many deployments.
-    judged: HashMap<Csum, bool>,
-    out: Vec<Finding>,
-    hashed: u64,
-    bytes: u64,
-}
-
-impl Run<'_> {
-    fn finding(&mut self, id: &str, sev: Severity, d: &Deployment, rel: &str, salient: &str, msg: String) {
-        self.out.push(
-            Finding::new(id, sev, format!("{}/{rel}", d.r#ref), salient)
-                .message(msg)
-                .detail(serde_json::json!({
-                    "ref": d.r#ref,
-                    "commit": ostree::hex(&d.commit),
-                    "path": rel,
-                })),
-        );
-    }
-
-    /// Whether `path`'s content matches `c`, hashing only when there is a
-    /// reason to. `obj` says whether `path` is the repository object itself.
-    fn intact(&mut self, c: &Csum, path: &Path, md: &std::fs::Metadata, obj: bool) -> bool {
-        if obj {
-            if let Some(&ok) = self.judged.get(c) {
-                return ok;
-            }
-        }
-        // A checkout's own copy (not the object) is remembered by its path.
-        let k = if obj {
-            key(c)
-        } else {
-            key(c) ^ path_hash(&path.to_string_lossy())
-        };
-        let ctime = md.ctime() * 1_000_000_000 + md.ctime_nsec();
-        let changed = md.ctime() > self.since;
-        let suspect = changed && self.verified.get(&k) != Some(&ctime);
-        let sampled = k % self.sample_days == self.today % self.sample_days;
-        if !(suspect || sampled) {
-            if changed {
-                self.next_verified.insert(k, ctime);
-            }
-            return true;
-        }
-        let ok = match self.repo.file_checksum(path) {
-            Ok(got) => {
-                self.hashed += 1;
-                self.bytes += md.size();
-                &got == c
-            }
-            Err(e) => {
-                tracing::debug!("{}: {e}", path.display());
-                return true;
-            }
-        };
-        if ok && changed {
-            self.next_verified.insert(k, ctime);
-        }
-        if obj {
-            self.judged.insert(*c, ok);
-        }
-        ok
-    }
-
-    fn deployment(&mut self, d: &Deployment) {
-        let commit = match self.repo.commit(&d.commit) {
-            Ok(c) => c,
-            Err(e) => {
-                self.finding(
-                    "flatpak-modified",
-                    Severity::High,
-                    d,
-                    "",
-                    "commit",
-                    format!("{}: its commit cannot be verified: {e:#}", d.r#ref),
-                );
-                return;
-            }
-        };
-        let mut entries: Vec<(String, Option<Csum>)> = Vec::new();
-        if let Err(e) = self.repo.walk(&commit.root_tree, &mut |rel, c| {
-            entries.push((rel.to_string(), c.copied()));
-        }) {
-            self.finding(
-                "flatpak-modified",
-                Severity::High,
-                d,
-                "",
-                "tree",
-                format!("{}: its tree cannot be verified: {e:#}", d.r#ref),
-            );
-            return;
-        }
-        let mut expected: HashSet<&str> = HashSet::with_capacity(entries.len());
-        for (rel, c) in &entries {
-            if generated(rel) || !in_subpaths(rel, &d.subpaths) {
-                continue;
-            }
-            expected.insert(rel);
-            let Some(c) = c else { continue };
-            self.file(d, rel, c);
-        }
-        self.extras(d, &expected);
-    }
-
-    fn file(&mut self, d: &Deployment, rel: &str, c: &Csum) {
-        let path = d.dir.join(rel);
-        let obj = self.repo.object_path(c, "file");
-        let omd = std::fs::symlink_metadata(&obj).ok();
-        let md = match std::fs::symlink_metadata(&path) {
-            Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let mode = omd.as_ref().map(|m| m.mode()).unwrap_or(0);
-                self.finding(
-                    "flatpak-missing",
-                    severity_for(rel, mode).min(Severity::Medium),
-                    d,
-                    rel,
-                    "",
-                    format!("{}: {rel} is missing", d.r#ref),
-                );
-                return;
-            }
-            Err(e) => {
-                tracing::debug!("{}: {e}", path.display());
-                return;
-            }
-        };
-        let Some(omd) = omd else {
-            // The object is gone (pruned, or deleted): hash the checkout.
-            if self.repo.file_checksum(&path).is_ok_and(|g| &g == c) {
-                return;
-            }
-            self.modified(d, rel, md.mode(), "content");
-            return;
-        };
-        if md.file_type() != omd.file_type() {
-            self.modified(d, rel, omd.mode(), "type");
-            return;
-        }
-        if md.file_type().is_symlink() {
-            if std::fs::read_link(&path).ok() != std::fs::read_link(&obj).ok() {
-                self.modified(d, rel, 0, "symlink");
-            }
-            return;
-        }
-        let same = md.dev() == omd.dev() && md.ino() == omd.ino();
-        let ok = if same {
-            self.intact(c, &obj, &omd, true)
-        } else {
-            self.intact(c, &path, &md, false)
-        };
-        if !ok {
-            self.modified(d, rel, md.mode(), "content");
-        }
-    }
-
-    fn modified(&mut self, d: &Deployment, rel: &str, mode: u32, kind: &str) {
-        if placeholder(rel, &d.dir.join(rel)) {
-            return;
-        }
-        let what = match kind {
-            "type" => "is no longer the type its commit records",
-            "symlink" => "points elsewhere than its commit records",
-            _ => "differs from its commit",
-        };
-        self.finding(
-            "flatpak-modified",
-            severity_for(rel, mode),
-            d,
-            rel,
-            kind,
-            format!("{}: {rel} {what}", d.r#ref),
-        );
-    }
-
-    /// Files in the checkout that its commit does not have.
-    fn extras(&mut self, d: &Deployment, expected: &HashSet<&str>) {
-        let mut stack = vec![String::from("files")];
-        let mut found = Vec::new();
-        while let Some(rel) = stack.pop() {
-            let Ok(rd) = std::fs::read_dir(d.dir.join(&rel)) else {
-                continue;
-            };
-            for e in rd.flatten() {
-                let Ok(name) = e.file_name().into_string() else {
-                    continue;
-                };
-                let r = format!("{rel}/{name}");
-                if generated(&r) || placeholder(&r, &e.path()) {
-                    continue;
-                }
-                let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
-                if !expected.contains(r.as_str()) {
-                    let mode = e.metadata().map(|m| m.mode()).unwrap_or(0);
-                    found.push((r, mode));
-                    continue;
-                }
-                if is_dir {
-                    stack.push(r);
-                }
-            }
-        }
-        found.sort();
-        for (r, mode) in found {
-            self.finding(
-                "flatpak-modified",
-                severity_for(&r, mode),
-                d,
-                &r,
-                "added",
-                format!("{}: {r} is not in its commit", d.r#ref),
-            );
-        }
+/// A flatpak path as the sandbox knows it, for its severity: `files/` is
+/// the app's or runtime's `/usr`.
+fn host_path(rel: &str) -> String {
+    match rel.strip_prefix("files/") {
+        Some(r) => format!("/usr/{r}"),
+        None => format!("/{rel}"),
     }
 }
 
@@ -409,27 +179,33 @@ impl Check for FlatpakVerify {
         unavailable(host)
     }
 
-    fn run(&self, ctx: &Ctx, _: &mut Anchors) -> anyhow::Result<Vec<Finding>> {
+    fn run(&self, ctx: &Ctx, anchors: &mut Anchors) -> anyhow::Result<Vec<Finding>> {
         let repo = repo(ctx.host)?;
         let deps = deployments(ctx.host);
+        // flatpak writes `deploy` after the checkout's links, so no slack is
+        // needed: later ctimes are later changes.
         let newest = deps.iter().map(|d| d.deployed).max().unwrap_or(0);
-        let days = ctx.cfg.scan.sample_days.max(1) as u64;
-        let mut run = Run {
-            repo: &repo,
-            // flatpak writes `deploy` after the checkout's links, so no
-            // slack is needed: later ctimes are later changes.
-            since: newest,
-            sample_days: days,
-            today: ctx.now / 86_400,
-            verified: load_verified(&ctx.state_dir, VERIFIED),
-            next_verified: HashMap::new(),
-            judged: HashMap::new(),
-            out: Vec::new(),
-            hashed: 0,
-            bytes: 0,
-        };
+        let mut run = Verifier::new(
+            &repo,
+            super::checkout::since(anchors, newest),
+            ctx.cfg.scan.sample_days as u64,
+            ctx.now / 86_400,
+            load_verified(&ctx.state_dir, VERIFIED),
+        );
+        let exempt = |rel: &str, p: &Path| generated(rel) || placeholder(rel, p);
         for d in &deps {
-            run.deployment(d);
+            let wanted = |rel: &str| !generated(rel) && in_subpaths(rel, &d.subpaths);
+            run.checkout(&Checkout {
+                label: d.r#ref.clone(),
+                commit: d.commit,
+                dir: d.dir.clone(),
+                modified: "flatpak-modified",
+                missing: "flatpak-missing",
+                wanted: &wanted,
+                exempt: &exempt,
+                extras_root: "files",
+                host_path,
+            });
         }
         if let Err(e) = save_verified(&ctx.state_dir, VERIFIED, &run.next_verified) {
             tracing::warn!("{VERIFIED}: {e}");

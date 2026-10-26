@@ -39,6 +39,53 @@ pub struct DirTree {
     pub dirs: Vec<(String, Csum, Csum)>,
 }
 
+/// The booted deployment of an ostree system, from the kernel command
+/// line's `ostree=` (which names its boot entry, a symlink to it).
+pub struct Booted {
+    pub stateroot: String,
+    /// `COMMIT.SERIAL`
+    pub name: String,
+    pub commit: Csum,
+    /// `/sysroot/ostree/deploy/STATEROOT/deploy/COMMIT.SERIAL`, as a path
+    /// on this host.
+    pub dir: PathBuf,
+}
+
+/// The system repository of an ostree-booted host.
+pub const SYSTEM_REPO: &str = "/sysroot/ostree/repo";
+
+pub fn booted(host: &crate::host::Host) -> anyhow::Result<Booted> {
+    let cmdline = host.read_opt("/proc/cmdline").unwrap_or_default();
+    let arg = cmdline
+        .split_whitespace()
+        .find_map(|a| a.strip_prefix("ostree="))
+        .ok_or_else(|| anyhow::anyhow!("no ostree= on the kernel command line"))?;
+    let dir = std::fs::canonicalize(host.path(arg)).map_err(|e| anyhow::anyhow!("{arg}: {e}"))?;
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| anyhow::anyhow!("{arg}: no deployment"))?
+        .to_string();
+    let stateroot = dir
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let commit = name
+        .split('.')
+        .next()
+        .and_then(parse_csum)
+        .ok_or_else(|| anyhow::anyhow!("{}: not a deployment", dir.display()))?;
+    Ok(Booted {
+        stateroot,
+        name,
+        commit,
+        dir,
+    })
+}
+
 pub fn hex(c: &Csum) -> String {
     digest::hex(c)
 }

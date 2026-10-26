@@ -9,7 +9,7 @@
 # IMAGE is one of: ubuntu-24.04, fcos. The image is downloaded once, checked
 # against its published SHA-256, and kept in target/vm-images/; each run
 # boots it with -snapshot, so it is never modified. The repo is shared
-# read-only at /repo (9p) and SCRIPT runs there as root, with network
+# read-only at /run/repo (9p; / may be read-only) and SCRIPT runs there as root, with network
 # through qemu's user mode. Its output appears on stdout and its exit
 # status is this script's. VM_TIMEOUT (seconds, default 900) bounds a run.
 set -euo pipefail
@@ -54,7 +54,7 @@ fetch() {
 # The runner: mount the repo, run the script between markers on the second
 # serial port (the first is the console), power off.
 args=$(printf ' %q' "$@")
-runner="mkdir -p /repo && mount -t 9p -o trans=virtio,version=9p2000.L,ro repo /repo && cd /repo && { echo VM-START; bash $(printf %q "$rel")$args; echo \"VM-EXIT-STATUS \$?\"; } >/dev/ttyS1 2>&1; systemctl poweroff"
+runner="{ echo VM-START; mkdir -p /run/repo && mount -t 9p -o trans=virtio,version=9p2000.L,ro repo /run/repo && cd /run/repo && bash $(printf %q "$rel")$args; echo \"VM-EXIT-STATUS \$?\"; } >/dev/ttyS1 2>&1; systemctl poweroff"
 
 case $image in
 ubuntu-24.04)
@@ -128,7 +128,7 @@ touch "$work/out"
 status=$(sed -n 's/^VM-EXIT-STATUS \([0-9]*\).*/\1/p' "$work/out" | tr -d '\r' | tail -1)
 if [ -z "$status" ]; then
 	echo "cloud.sh: the script did not finish; console:" >&2
-	tail -50 "$work/console" "$work/qemu.log" | tr -d '\r' >&2
+	tail -n 50 "$work/console" "$work/qemu.log" | tr -d '\r' >&2
 	exit 1
 fi
 tr -d '\r' <"$work/out" | sed -n '/^VM-START/,/^VM-EXIT-STATUS/p' | sed '1d;$d'

@@ -3,7 +3,8 @@
 //! way; so do BPF trampolines, kprobes, live patches, and an admin running a
 //! tracer, which are reported at lower severity and grouped by owner. BPF
 //! trampolines are not reported at all when every loaded tracing program is
-//! known (systemd's, minsec-id's own).
+//! known (systemd's, minsec-id's own), nor kprobes that systemd's own
+//! programs attach.
 
 use super::{Anchors, Check, Cost, Ctx, Unavailable};
 use crate::finding::{fingerprint, Finding, Severity};
@@ -90,11 +91,25 @@ impl Check for Ftrace {
         };
         // BPF trampolines are explained when every loaded tracing program
         // is (bpf-prog-unknown reports the ones that are not).
-        let bpf_explained = ctx.host.root() == std::path::Path::new("/")
-            && super::bpf_progs::unexplained(ctx.host).is_ok_and(|(u, _)| u.is_empty());
+        let live = ctx.host.root() == std::path::Path::new("/");
+        let bpf_explained = live && super::bpf_progs::unexplained(ctx.host).is_ok_and(|(u, _)| u.is_empty());
+        // Kprobes systemd's own BPF programs attach (nsresourced's).
+        let kprobes = if live {
+            super::bpf_progs::explained_kprobes(ctx.host)
+        } else {
+            Vec::new()
+        };
         Ok(parse(&text)
             .into_iter()
             .filter(|(o, _)| !(o == "bpf" && bpf_explained))
+            .filter_map(|(o, (sev, funcs))| {
+                let funcs: Vec<String> = if o == "kprobe" {
+                    funcs.into_iter().filter(|f| !kprobes.contains(&f.as_str())).collect()
+                } else {
+                    funcs
+                };
+                (!funcs.is_empty()).then_some((o, (sev, funcs)))
+            })
             .map(|(o, (sev, mut funcs))| {
                 funcs.sort();
                 let salient = fingerprint(&funcs.iter().map(String::as_str).collect::<Vec<_>>());
