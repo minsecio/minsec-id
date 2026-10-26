@@ -6,14 +6,18 @@
 
 pub mod check;
 pub mod config;
+pub mod digest;
 pub mod duration;
 pub mod events;
 pub mod finding;
 pub mod host;
 pub mod inspect;
+pub mod pkgdb;
+pub mod procfs;
 pub mod scan;
 pub mod sink;
 pub mod state;
+pub mod users;
 
 pub use config::Config;
 pub use finding::{Finding, Severity};

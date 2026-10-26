@@ -1,0 +1,272 @@
+.TH MINSEC-ID 1 "2026-10-26" "minsec-id" "User Commands"
+.SH NAME
+minsec-id \- minimalist host intrusion detection for modern Linux
+.SH SYNOPSIS
+.B minsec-id
+.RI [ options ]
+.I command
+.RI [ command-options ]
+.SH DESCRIPTION
+.B minsec-id
+checks a host for signs of intrusion using what the system already records,
+instead of keeping a database of its own.
+File contents are compared with the digests the package manager recorded
+(rpm or dpkg); kernel state comes from
+.IR /proc ,
+.IR /sys ,
+and the
+.BR bpf (2)
+and
+.BR sock_diag (7)
+interfaces.
+.PP
+Scans are run by systemd timers: a quick scan every 30 minutes and a full scan
+daily.
+Nothing stays resident between scans.
+A file is hashed only when there is evidence it changed (its ctime is newer
+than its package's install time, or its size or mtime differ), or when
+it falls in the day's slice of a rolling sample that covers every packaged
+file once per
+.B scan.sample_days
+days.
+.PP
+Each check has a stable id.
+A finding is reported once, when first seen or when it changes, and stays open
+until a later run of its check no longer sees it; it is then logged as
+resolved.
+Checks that compare against a baseline record it on their first run; later
+runs report changes until they are reverted or the baseline is reset with
+.BR "minsec-id baseline \-\-reset" .
+.SH GLOBAL OPTIONS
+.TP
+.BR \-c " " \fIdirectory\fR ", " \-\-config-dir " " \fIdirectory\fR
+Use
+.I directory
+as the configuration directory instead of
+.IR /etc/minsec-id .
+.TP
+.B \-\-json
+Write one machine-readable JSON document to standard output.
+Documents describing a scan or inspection carry a
+.B schema_version
+field.
+.TP
+.BR \-h ", " \-\-help
+Show help and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the program version and exit.
+.SH COMMANDS
+.SS "scan [--quick | --full] [--check id]... [-q]"
+Run the enabled checks.
+.B \-\-quick
+(the default) runs checks that read only
+.IR /proc ,
+.IR /sys ,
+metadata, and small files;
+.B \-\-full
+adds checks that read file contents at scale.
+.B \-\-check
+runs only the named checks, enabled or not.
+New and resolved findings go to the findings log, to journald (unless
+disabled), and to the notify hook.
+.B \-q
+prints nothing.
+.SS status
+Show the last scan and counts of open findings by severity.
+.SS "findings [--all] [--severity level]"
+List open findings, most severe first.
+.B \-\-all
+includes accepted findings.
+.SS "show finding"
+Show one finding, by fingerprint or
+.IR check : subject .
+.SS "accept finding [--reason text]"
+Write an accept rule for a finding to
+.IR conf.d/accept.toml .
+The rule is keyed
+.IR check : subject ,
+so it covers future changes to the same subject; a subject ending in
+.B *
+matches by prefix.
+Accepted findings are recorded but not reported.
+.SS "unaccept key"
+Remove an accept rule from
+.IR conf.d/accept.toml .
+.SS "verify path | package"
+Hash one packaged file, or every file of one package, and compare it with
+the package database, configuration files included.
+.SS "baseline [--reset] [--check id]..."
+List the baselines recorded by checks, or, with
+.BR \-\-reset ,
+forget them so the next scan records the current state.
+Reset after reviewing a reported change you want to keep.
+.SS checks
+List checks: an asterisk marks enabled ones; each shows its cost and whether
+it can run on this host.
+.SS "enable check" ", " "disable check"
+Write
+.IR conf.d/ check .toml .
+.SS inspect
+Report kernel features (BTF, BPF LSM, IMA, lockdown, Secure Boot), the active
+LSMs, the package managers present, whether the host boots from ostree, the
+configuration sources, and the checks.
+.SS check
+Validate the configuration.
+.SS "events [-n count]"
+Print the last records of the findings log (JSON Lines).
+.SH CHECKS
+.TP
+.B kernel-tainted
+Kernel taint flags, with the modules responsible.
+.TP
+.BR kmod-unowned ", " kmod-hidden
+Loaded modules no package installed; modules missing from one of
+.IR /proc/modules ,
+.IR /sys/module ,
+and
+.IR /proc/kallsyms .
+.TP
+.B bpf-prog-unknown
+Loaded eBPF programs of tracing, kprobe, and LSM types.
+.TP
+.B ftrace-hooks
+Kernel functions hooked through ftrace, grouped by owner.
+.TP
+.BR boot-posture " (emits " boot-cmdline )
+Lockdown, Secure Boot, module signature enforcement, SELinux and AppArmor
+modes, and hardening sysctls getting weaker than the baseline; command-line
+parameters that disable protections.
+.TP
+.B boot-kernel
+Kernel images in
+.I /boot
+compared with their packaged copies (full scans).
+.TP
+.BR pkg-signatures " (emits " pkg-db-tampered ", " pkg-unsigned )
+rpm header signature failures, which mean the rpm database was edited, and
+unsigned packages.
+.TP
+.BR pkg-verify " (emits " pkg-modified ", " pkg-missing ", " pkg-mode-changed ", " pkg-config-modified )
+Installed files against package digests, modes, and link targets, honouring
+rpm's
+.B %verify
+attributes (full scans).
+.TP
+.B exe-unowned
+Executables, top-level shared libraries, and setuid, setgid, or file
+capability binaries in system paths that no package owns.
+.TP
+.BR repo-key-changed ", " repo-changed " (emits " repo-insecure )
+Package signing keys and repositories added or changed; repositories that
+skip signature checks.
+.TP
+.BR proc-exe " (emits " proc-exe-deleted ", " proc-exe-memfd ", " proc-exe-writable )
+Processes running from deleted files, anonymous memory files, or writable or
+hidden locations.
+.TP
+.B proc-preload
+.IR /etc/ld.so.preload ,
+.B LD_PRELOAD
+in process environments, and executable mappings from writable, memory, or
+deleted files.
+.TP
+.B proc-service-shell
+Shells and interpreters run by service accounts with a TCP or UDP socket on
+standard input or output.
+.TP
+.BR net-listener " (emits " net-hidden ", " net-listener-unowned )
+Listening sockets that
+.I /proc/net
+hides from the kernel's own socket list, and listeners served by binaries no
+package owns.
+.TP
+.B net-raw-socket
+Packet and raw IP sockets held by unexpected processes.
+.TP
+.BR persistence " (emits " persist-new ", " persist-changed )
+New or changed systemd units and generators, cron and at jobs, shell startup
+files, udev and modprobe rules, PAM configuration and modules, sudoers, sshd
+configuration, loader configuration, package manager and initramfs hooks,
+and per-user equivalents.
+.TP
+.BR accounts " (emits " account-uid0 ", " account-password-empty ", " account-new ", " sudo-nopasswd )
+Extra uid-0 accounts, empty passwords, new login accounts, and new
+passwordless sudo rules.
+.TP
+.B ssh-key-new
+SSH keys authorized for any account, by fingerprint, and
+.BR AuthorizedKeysCommand .
+.TP
+.BR anti-forensics " (emits " history-devnull ", " log-truncated )
+History files linked to
+.IR /dev/null ;
+login and authentication logs truncated in place.
+.SH JOURNAL
+Findings are sent to journald with
+.B SYSLOG_IDENTIFIER=minsec-id
+and the fields
+.BR MINSEC_CHECK ,
+.BR MINSEC_SEVERITY ,
+.BR MINSEC_SUBJECT ,
+and
+.BR MINSEC_FINGERPRINT ,
+so
+.B journalctl MINSEC_SEVERITY=critical
+lists the critical ones.
+Severity maps to the syslog priority.
+.SH PRIVILEGES
+Scans should run as root: reading other users' processes needs
+.BR CAP_SYS_PTRACE ,
+listing BPF programs needs
+.BR CAP_SYS_ADMIN ,
+and many checked files are readable only by root.
+An unprivileged scan runs what it can and reports the rest as unavailable.
+.SH ENVIRONMENT
+.TP
+.B MINSEC_ID_LOG
+Log filter for diagnostics on standard error, in
+.B tracing
+syntax; the default is
+.BR warn .
+.SH FILES
+.TP
+.I /etc/minsec-id/minsec-id.toml
+Main configuration; see
+.BR minsec-id.toml (5).
+.TP
+.I /etc/minsec-id/conf.d/*.toml
+Drop-ins, merged in name order.
+.TP
+.I /var/lib/minsec-id/state.json
+Open findings, baselines, and the last scan.
+.TP
+.I /var/lib/minsec-id/findings.jsonl
+The findings log, rotated at 8 MiB to
+.IR findings.jsonl.1 .
+.TP
+.I /var/lib/minsec-id/verified.bin
+Files whose ctime moved after install but that hashed clean, so they are not
+re-hashed until it moves again.
+.SH EXIT STATUS
+.B scan
+and
+.B verify
+exit 0 when nothing is open or different, 2 when findings are open or a file
+differs, and 1 on error.
+Other commands exit 0 on success and 1 on error.
+.SH EXAMPLES
+.nf
+sudo minsec-id scan
+sudo minsec-id scan \-\-full \-\-check pkg-verify
+sudo minsec-id findings \-\-severity high
+sudo minsec-id accept kernel-tainted:P \-\-reason "NVIDIA driver"
+sudo minsec-id verify /usr/bin/sudo
+sudo minsec-id baseline \-\-reset \-\-check ssh-key-new
+journalctl SYSLOG_IDENTIFIER=minsec-id \-p warning
+.fi
+.SH SEE ALSO
+.BR minsec-id.toml (5),
+.BR minsec (1),
+.BR rpm (8),
+.BR dpkg (1)

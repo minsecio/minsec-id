@@ -18,6 +18,9 @@ libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+md-5 = "0.10"
+base64 = "0.22"
 
 [profile.release]
 opt-level = "s"

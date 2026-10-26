@@ -291,6 +291,33 @@ Units:
 with ctime-incremental hashing and rolling sampling. Also accept/baseline, `verify`, man pages,
 completions.
 
+Phase 1 as built, where it differs from the plan above:
+- **Configuration edits are watched by `persistence` only.** It runs in quick
+  scans and covers PAM, sudoers, sshd, the loader, shell startup files, and
+  more. `pkg-verify` skips configuration files, so one edit gives one
+  finding. `pkg-config-modified` is emitted only by `minsec-id verify`.
+- **No ownership cache.** Each scan streams the package database again:
+  about 0.7 s of CPU and 55 MB of memory on a 3,400-package workstation, and
+  a fraction of that on a server. A cache would be state an attacker could
+  edit.
+- **rpm `%verify` flags are honoured** (`FILEVERIFYFLAGS`), so `pkg-verify`
+  agrees with `rpm -V` about files the package expects to change.
+- **`pkg-db-tampered` relies on rpm's verification of header signatures as it
+  reads the database.** It has not yet been tested against a deliberately
+  edited rpmdb; that test belongs in the VM e2e suite.
+- **`proc-service-shell` ignores root.** A root shell with a socket on stdio
+  is not distinguished from legitimate ones yet.
+- **`net-raw-socket` judges the process holding the socket**, not the socket
+  filter attached to it. Reading the filter needs `packet_diag` and
+  `CAP_NET_ADMIN`; a BPFDoor-style process already stands out by running a
+  deleted or unowned binary.
+- **The scanner keeps `CAP_SYS_ADMIN`.** The kernel requires it to list BPF
+  programs.
+- **`boot-kernel`** compares `/boot/vmlinuz-*` with
+  `/usr/lib/modules/*/vmlinuz` (EL and Fedora). Debian packages the image
+  itself, so `pkg-verify` covers it there. Initramfs images are not checked.
+- **Deferred:** `journalctl --verify` for sealed journals.
+
 **Phase 2 (eBPF daemon):** §3.6, the control socket, `dirty.list` handoff to the scanner,
 `proc-hidden` / `kmod-hidden` via bpf iterators, RSS and BPF map budget gates.
 

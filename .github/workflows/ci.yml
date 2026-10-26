@@ -15,10 +15,11 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
-      - name: Shell scripts
+      - name: Shell scripts and completions
         run: |
-          sudo apt-get install -y shellcheck
-          shellcheck scripts/*.sh packaging/deb/*
+          sudo apt-get install -y bash-completion zsh fish shellcheck
+          shellcheck scripts/*.sh packaging/deb/* tests/*.sh completions/bash/*
+          tests/completions.sh "$PWD/target/debug/minsec-id"
       - run: cargo build --release
       - name: binary size gate
         run: |
@@ -33,5 +34,6 @@ jobs:
         run: |
           printf '[output]\njournal = false\n[paths]\nstate_dir = "%s"\n' "$RUNNER_TEMP/state" > "$RUNNER_TEMP/minsec-id.toml"
           target/release/minsec-id -c "$RUNNER_TEMP" inspect
-          rc=0; sudo target/release/minsec-id -c "$RUNNER_TEMP" scan || rc=$?
+          rc=0; sudo target/release/minsec-id -c "$RUNNER_TEMP" scan --full || rc=$?
           test "$rc" -eq 0 -o "$rc" -eq 2
+          sudo target/release/minsec-id -c "$RUNNER_TEMP" findings

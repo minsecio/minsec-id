@@ -2,6 +2,7 @@
 //! Loading and merging follow minsec (crates/minsec-core/src/config.rs); the
 //! generic part is to move to minsec-common.
 
+use crate::duration::HumanDuration;
 use crate::finding::{Finding, Severity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -38,6 +39,32 @@ fn d_min_severity() -> Severity {
 }
 
 impl Default for Output {
+    fn default() -> Self {
+        toml::from_str("").expect("defaults deserialize from empty table")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Scan {
+    /// Full scans re-hash every package file over this many days (one slice
+    /// per day), on top of files with evidence of change.
+    #[serde(default = "d_sample_days")]
+    pub sample_days: u32,
+    /// A packaged file whose ctime is this much newer than its package's
+    /// install time has changed since install and is hashed.
+    #[serde(default = "d_ctime_slack")]
+    pub ctime_slack: HumanDuration,
+}
+
+fn d_sample_days() -> u32 {
+    7
+}
+fn d_ctime_slack() -> HumanDuration {
+    std::time::Duration::from_secs(3600).into()
+}
+
+impl Default for Scan {
     fn default() -> Self {
         toml::from_str("").expect("defaults deserialize from empty table")
     }
@@ -93,6 +120,8 @@ pub struct Config {
     #[serde(default)]
     pub output: Output,
     #[serde(default)]
+    pub scan: Scan,
+    #[serde(default)]
     pub paths: Paths,
     #[serde(default)]
     pub checks: BTreeMap<String, CheckConfig>,
@@ -142,12 +171,15 @@ impl Config {
             let Some((check, subject)) = key.split_once(':') else {
                 anyhow::bail!("accept.\"{key}\": expected \"<check>:<subject>\"");
             };
-            if crate::check::get(check).is_none() {
-                anyhow::bail!("accept.\"{key}\": unknown check `{check}`");
+            if crate::check::producer(check).is_none() {
+                anyhow::bail!("accept.\"{key}\": unknown finding id `{check}`");
             }
             if subject.is_empty() {
                 anyhow::bail!("accept.\"{key}\": empty subject (use `*` to accept the whole check)");
             }
+        }
+        if self.scan.sample_days == 0 {
+            anyhow::bail!("scan.sample_days must be at least 1");
         }
         Ok(())
     }

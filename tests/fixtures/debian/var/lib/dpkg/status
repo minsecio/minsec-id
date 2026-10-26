@@ -1,0 +1,20 @@
+Package: coreutils
+Status: install ok installed
+Architecture: amd64
+Version: 9.1-1
+Description: GNU core utilities
+
+Package: libpam-modules
+Status: install ok installed
+Architecture: amd64
+Multi-Arch: same
+Version: 1.5.2-6
+Description: Pluggable Authentication Modules
+
+Package: openssh-server
+Status: install ok installed
+Architecture: amd64
+Version: 1:9.2p1-2
+Conffiles:
+ /etc/ssh/sshd_config 4cffd1d0d47522d5db7cd2e3b5fdf40e
+Description: secure shell (SSH) server

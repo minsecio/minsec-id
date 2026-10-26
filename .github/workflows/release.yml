@@ -97,6 +97,8 @@ jobs:
           rc=0; minsec-id scan || rc=$?
           test "$rc" -eq 0 -o "$rc" -eq 2
           minsec-id status
+          test -s /usr/share/man/man1/minsec-id.1
+          test -s /usr/share/bash-completion/completions/minsec-id
 
   release:
     needs: [build, smoke]

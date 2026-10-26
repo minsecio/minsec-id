@@ -222,6 +222,77 @@ fn run() -> anyhow::Result<i32> {
                 &format!("removed {key} ({}); applies from the next scan", path.display()),
             )
         }
+        Cmd::Verify { target } => {
+            let cfg = Config::load_dir(&cli.config_dir)?;
+            let ctx = check::Ctx::new(&host, &cfg, now());
+            let r = check::verify(&ctx, &target)?;
+            let code = if r.findings.is_empty() { 0 } else { EXIT_FINDINGS };
+            if cli.json {
+                println!("{}", serde_json::to_string(&r)?);
+                return Ok(code);
+            }
+            for f in &r.findings {
+                println!("{:<8} {:<20} {}", f.severity, f.check, f.message);
+            }
+            println!(
+                "{}: {} file(s) of {} checked, {} hashed, {}",
+                r.target,
+                r.files,
+                r.packages.join(", "),
+                r.hashed,
+                if r.findings.is_empty() {
+                    "intact".to_string()
+                } else {
+                    format!("{} difference(s)", r.findings.len())
+                }
+            );
+            Ok(code)
+        }
+        Cmd::Baseline { reset, checks } => {
+            let cfg = Config::load_dir(&cli.config_dir)?;
+            for id in &checks {
+                if check::get(id).is_none() {
+                    anyhow::bail!("unknown check `{id}` (see `minsec-id checks`)");
+                }
+            }
+            if reset {
+                let _lock = minsec_id_core::state::Lock::acquire(&cfg.paths.state_dir)?;
+                let mut state = State::load(&cfg.state_file())?;
+                let before = state.anchors.len();
+                state.anchors.retain(|id, _| !checks.is_empty() && !checks.contains(id));
+                state.save(&cfg.state_file())?;
+                return finish(
+                    cli.json,
+                    &format!(
+                        "reset {} baseline(s); the next scan records the current state (run `minsec-id scan --full` now)",
+                        before - state.anchors.len()
+                    ),
+                );
+            }
+            let state = State::load(&cfg.state_file())?;
+            let shown: Vec<(&String, usize)> = state
+                .anchors
+                .iter()
+                .filter(|(id, m)| !m.is_empty() && (checks.is_empty() || checks.contains(id)))
+                .map(|(id, m)| (id, m.len()))
+                .collect();
+            if cli.json {
+                let v: std::collections::BTreeMap<&String, &std::collections::BTreeMap<String, String>> = state
+                    .anchors
+                    .iter()
+                    .filter(|(id, _)| checks.is_empty() || checks.contains(id))
+                    .collect();
+                println!("{}", serde_json::to_string(&v)?);
+                return Ok(0);
+            }
+            if shown.is_empty() {
+                println!("no baselines recorded yet (they are recorded by the first scan)");
+            }
+            for (id, n) in shown {
+                println!("{id:<20} {n} recorded item(s)");
+            }
+            Ok(0)
+        }
         Cmd::Checks => {
             let cfg = Config::load_dir(&cli.config_dir)?;
             let list = inspect::checks(&cfg, &host);
@@ -370,10 +441,12 @@ fn print_report(r: &scan::Report) {
         r.accepted,
         r.duration_ms
     );
-    for c in &r.checks {
-        if let Some(e) = &c.error {
-            println!("  {} {}: {e}", c.id, c.status);
-        }
+    for c in r.checks.iter().filter(|c| c.status == "error") {
+        println!("  {} failed: {}", c.id, c.error.as_deref().unwrap_or(""));
+    }
+    let unavailable = r.checks.iter().filter(|c| c.status == "unavailable").count();
+    if unavailable > 0 {
+        println!("  {unavailable} check(s) unavailable on this host (see `minsec-id checks`)");
     }
     for f in &r.findings {
         println!(

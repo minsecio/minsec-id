@@ -2,7 +2,7 @@
 //! open findings in `state.json`, and send only what is new or resolved to the
 //! sinks.
 
-use crate::check::{self, Check, Cost, Ctx};
+use crate::check::{self, Anchors, Check, Cost, Ctx};
 use crate::config::Config;
 use crate::events::{now, Event, EventLog};
 use crate::finding::Finding;
@@ -104,11 +104,11 @@ pub fn run(cfg: &Config, opts: &Options) -> anyhow::Result<Report> {
     // Findings of checks disabled since they were reported are dropped, not
     // resolved: nothing re-examined them.
     state.open.retain(|_, o| {
-        opts.only.contains(&o.finding.check)
-            || check::get(&o.finding.check).is_some_and(|c| cfg.check_enabled(c.id(), c.default_enabled()))
+        check::producer(&o.finding.check)
+            .is_some_and(|c| opts.only.iter().any(|id| id == c.id()) || cfg.check_enabled(c.id(), c.default_enabled()))
     });
     let mut log = EventLog::open(&cfg.events_file())?;
-    let ctx = Ctx { host: &opts.host };
+    let ctx = Ctx::new(&opts.host, cfg, ts);
 
     let mut runs = Vec::new();
     let mut errors = BTreeMap::new();
@@ -127,8 +127,24 @@ pub fn run(cfg: &Config, opts: &Options) -> anyhow::Result<Report> {
             });
             continue;
         }
-        let found = match c.run(&ctx) {
-            Ok(f) => f,
+        let mut anchors = Anchors {
+            fresh: !state.anchors.contains_key(id),
+            map: state.anchors.get(id).cloned().unwrap_or_default(),
+        };
+        let found = match c.run(&ctx, &mut anchors) {
+            Ok(f) => {
+                state.anchors.insert(id.to_string(), anchors.map);
+                f
+            }
+            Err(e) if e.downcast_ref::<check::Unavailable>().is_some() => {
+                runs.push(CheckRun {
+                    id: id.into(),
+                    status: "unavailable".into(),
+                    error: Some(format!("{e}")),
+                    findings: 0,
+                });
+                continue;
+            }
             Err(e) => {
                 let msg = format!("{e:#}");
                 tracing::warn!("check {id}: {msg}");
@@ -189,7 +205,7 @@ pub fn run(cfg: &Config, opts: &Options) -> anyhow::Result<Report> {
         let gone: Vec<String> = state
             .open
             .iter()
-            .filter(|(fp, o)| o.finding.check == id && !seen.contains(*fp))
+            .filter(|(fp, o)| check::producer(&o.finding.check).is_some_and(|p| p.id() == id) && !seen.contains(*fp))
             .map(|(fp, _)| fp.clone())
             .collect();
         for fp in gone {
