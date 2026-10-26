@@ -65,6 +65,11 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
             let cfg = Config::load_dir(&cli.config_dir)?;
             let state = State::load(&cfg.state_file())?;
             let daemon = daemon_status(&cfg);
+            let recent: Vec<monitor::Recent> = monitor::recent(&cfg, now())
+                .into_iter()
+                .filter(|r| r.accepted.is_none())
+                .collect();
+            let window = minsec_id_core::duration::format(Duration::from_secs(cfg.daemon.recent.secs()));
             if cli.json {
                 let open: Vec<&OpenFinding> = state.unaccepted().collect();
                 println!(
@@ -80,6 +85,8 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
                             Ok(s) => serde_json::to_value(s)?,
                             Err(e) => serde_json::json!({ "running": false, "error": e }),
                         },
+                        "daemon_recent": recent.len(),
+                        "daemon_recent_by_severity": by_severity_of(recent.iter().map(|r| &r.finding)),
                     })
                 );
                 return Ok(0);
@@ -121,13 +128,26 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
                     println!("  {id}: {e}");
                 }
             }
+            let sev: Vec<String> = by_severity_of(recent.iter().map(|r| &r.finding))
+                .iter()
+                .rev()
+                .map(|(s, n)| format!("{n} {s}"))
+                .collect();
+            let found = format!(
+                "{} finding(s) in the last {window}{}",
+                recent.len(),
+                if sev.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", sev.join(", "))
+                }
+            );
             match daemon {
                 Ok(d) => {
-                    let found: u64 = d.stats.findings.values().sum();
-                    let events: u64 = d.stats.events.values().sum();
+                    let checked: u64 = d.stats.events.values().sum();
                     let attached = d.probes.iter().filter(|p| p.attached).count();
                     println!(
-                        "daemon: up {} · {attached}/{} probes · {events} events · {found} findings · {} lost · {} KiB",
+                        "daemon: up {} · {attached}/{} probes · {found} · {checked} kernel records checked, {} lost · {} KiB",
                         minsec_id_core::duration::format(Duration::from_secs(d.uptime)),
                         d.probes.len(),
                         d.dropped,
@@ -137,7 +157,8 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
                         println!("  probe {} not attached: {}", p.probe, p.error.as_deref().unwrap_or(""));
                     }
                 }
-                Err(e) => println!("daemon: {e}"),
+                Err(e) if recent.is_empty() => println!("daemon: {e}"),
+                Err(e) => println!("daemon: {e} · {found}"),
             }
             Ok(0)
         }
@@ -161,10 +182,26 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
                     .cmp(&a.finding.severity)
                     .then_with(|| a.finding.key().cmp(&b.finding.key()))
             });
+            // The daemon's, most recent first: they happened, rather than
+            // being a state a later scan can see resolved.
+            let mut recent = monitor::recent(&cfg, now());
+            recent.retain(|r| (all || r.accepted.is_none()) && r.finding.severity >= min);
             if cli.json {
-                println!("{}", serde_json::to_string(&list)?);
+                let mut out = Vec::new();
+                for o in &list {
+                    let mut v = serde_json::to_value(o)?;
+                    v["source"] = "scan".into();
+                    out.push(v);
+                }
+                for r in &recent {
+                    let mut v = serde_json::to_value(r)?;
+                    v["source"] = "daemon".into();
+                    out.push(v);
+                }
+                println!("{}", serde_json::to_string(&out)?);
                 return Ok(0);
             }
+            let accepted = |a: &Option<String>| a.as_ref().map(|k| format!("  (accepted: {k})")).unwrap_or_default();
             for o in list {
                 let f = &o.finding;
                 println!(
@@ -173,10 +210,24 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
                     f.severity,
                     f.key(),
                     f.message,
-                    o.accepted
-                        .as_ref()
-                        .map(|k| format!("  (accepted: {k})"))
-                        .unwrap_or_default()
+                    accepted(&o.accepted)
+                );
+            }
+            for r in recent {
+                let f = &r.finding;
+                println!(
+                    "{} {:<8} {:<32} {}  [daemon: {}{} ago]{}",
+                    f.fingerprint,
+                    f.severity,
+                    f.key(),
+                    f.message,
+                    if r.count > 1 {
+                        format!("{}×, last ", r.count)
+                    } else {
+                        String::new()
+                    },
+                    ago(r.last_seen),
+                    accepted(&r.accepted)
                 );
             }
             Ok(0)
@@ -184,6 +235,33 @@ fn run(cli: Cli) -> anyhow::Result<i32> {
         Cmd::Show { finding } => {
             let cfg = Config::load_dir(&cli.config_dir)?;
             let state = State::load(&cfg.state_file())?;
+            if lookup(&state, &finding).is_err() {
+                if let Some(r) = monitor::recent(&cfg, now())
+                    .into_iter()
+                    .find(|r| r.finding.fingerprint == finding || r.finding.key() == finding)
+                {
+                    if cli.json {
+                        println!("{}", serde_json::to_string(&r)?);
+                        return Ok(0);
+                    }
+                    let f = &r.finding;
+                    println!("{}  [{}] {}", f.key(), f.severity, f.message);
+                    println!("fingerprint {} · reported by the daemon", f.fingerprint);
+                    println!(
+                        "reported {} time(s): first {} ago · last {} ago",
+                        r.count,
+                        ago(r.first_seen),
+                        ago(r.last_seen)
+                    );
+                    if let Some(k) = &r.accepted {
+                        println!("accepted by {k}");
+                    }
+                    if !f.detail.is_null() {
+                        println!("{}", serde_json::to_string_pretty(&f.detail)?);
+                    }
+                    return Ok(0);
+                }
+            }
             let o = lookup(&state, &finding)?;
             if cli.json {
                 println!("{}", serde_json::to_string(o)?);
@@ -426,6 +504,16 @@ fn by_severity<'a>(it: impl Iterator<Item = &'a OpenFinding>) -> std::collection
     let mut m = std::collections::BTreeMap::new();
     for o in it {
         *m.entry(o.finding.severity).or_default() += 1;
+    }
+    m
+}
+
+fn by_severity_of<'a>(
+    it: impl Iterator<Item = &'a minsec_id_core::Finding>,
+) -> std::collections::BTreeMap<Severity, usize> {
+    let mut m = std::collections::BTreeMap::new();
+    for f in it {
+        *m.entry(f.severity).or_default() += 1;
     }
     m
 }

@@ -309,9 +309,63 @@ fn dirty_candidate(path: &str) -> bool {
         && !path.ends_with(".pyc")
 }
 
+/// A daemon finding as `minsec-id findings` shows it: every report of one
+/// fingerprint within `daemon.recent`, from the findings log.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Recent {
+    #[serde(flatten)]
+    pub finding: Finding,
+    pub first_seen: u64,
+    pub last_seen: u64,
+    /// How many times it was reported (repeats within `daemon.repeat` are
+    /// not reported, so this undercounts occurrences).
+    pub count: u64,
+    /// The accept rule covering it now, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<String>,
+}
+
+/// Daemon findings reported since `now - daemon.recent`, most recent first.
+pub fn recent(cfg: &Config, now: u64) -> Vec<Recent> {
+    let since = now.saturating_sub(cfg.daemon.recent.secs());
+    let mut by_fp: HashMap<String, Recent> = HashMap::new();
+    for ev in crate::events::EventLog::read_all(&cfg.events_file()) {
+        let crate::events::Event::Finding { ts, finding } = ev else {
+            continue;
+        };
+        if ts < since || rule_for(&finding.check).is_none() {
+            continue;
+        }
+        by_fp
+            .entry(finding.fingerprint.clone())
+            .and_modify(|r| {
+                r.last_seen = ts;
+                r.count += 1;
+                r.finding = finding.clone();
+            })
+            .or_insert_with(|| Recent {
+                accepted: None,
+                finding,
+                first_seen: ts,
+                last_seen: ts,
+                count: 1,
+            });
+    }
+    let mut v: Vec<Recent> = by_fp
+        .into_values()
+        .map(|mut r| {
+            r.accepted = cfg.accepted(&r.finding).map(|(k, _)| k.to_string());
+            r
+        })
+        .collect();
+    v.sort_by_key(|r| std::cmp::Reverse(r.last_seen));
+    v
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Stats {
-    /// Events received, by kind.
+    /// Kernel records examined, by kind: execs not already known to be
+    /// unremarkable, and writes to watched paths. Not findings.
     pub events: BTreeMap<String, u64>,
     /// Findings reported, by severity.
     pub findings: BTreeMap<Severity, u64>,
@@ -432,6 +486,18 @@ impl Engine {
 
     pub fn handle(&mut self, ev: &Event, now: u64) -> Outcome {
         *self.stats.events.entry(ev.kind.as_str().into()).or_default() += 1;
+        tracing::debug!(
+            "{} pid={} uid={} comm={} flags={:#x} path={} name={} arg0={:#x} arg1={:#x}",
+            ev.kind.as_str(),
+            ev.pid,
+            ev.uid,
+            ev.comm,
+            ev.flags,
+            ev.path,
+            ev.name,
+            ev.arg0,
+            ev.arg1
+        );
         let rule = rule_of(ev.kind);
         if !self.enabled(rule) {
             return Outcome {
@@ -753,9 +819,17 @@ impl Engine {
     }
 
     fn bpf(&mut self, ev: &Event) -> Vec<Finding> {
-        // systemd attaches its own (RestrictFileSystems=, …). A scan's task
-        // iterator, and the loader's feature probes before it, are ours.
+        // A scan's task iterator, and the loader's feature probes before
+        // it, are ours.
         if ev.pid == 1 || self.is_self(ev.pid) {
+            return Vec::new();
+        }
+        let exe = self.exe_of(ev.pid).unwrap_or_else(|| ev.comm.clone());
+        // systemd (the system and user managers, and its helpers) loads its
+        // own: RestrictFileSystems=, and feature probes such as det_arg_ctx.
+        // Only the packaged binaries count: the kernel resolves the exe, and
+        // replacing one is itself reported.
+        if exe.starts_with("/usr/lib/systemd/") && self.owns(&exe) == Some(true) {
             return Vec::new();
         }
         let kind = bpf_progs::TRACING_TYPES
@@ -764,7 +838,6 @@ impl Engine {
             .map(|(_, k)| *k)
             .unwrap_or("tracing");
         let name = if ev.name.is_empty() { "(unnamed)" } else { &ev.name };
-        let exe = self.exe_of(ev.pid).unwrap_or_else(|| ev.comm.clone());
         vec![
             Finding::new("bpf-load", Severity::Medium, format!("{exe}:{kind}/{name}"), "")
                 .message(format!("{exe} (pid {}) loaded a {kind} BPF program {name}", ev.pid))

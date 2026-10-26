@@ -76,10 +76,16 @@ pub struct Daemon {
     /// The same finding (same fingerprint) is reported again only after this long.
     #[serde(default = "d_repeat")]
     pub repeat: HumanDuration,
+    /// `minsec-id findings` lists daemon findings from this far back.
+    #[serde(default = "d_recent")]
+    pub recent: HumanDuration,
 }
 
 fn d_repeat() -> HumanDuration {
     std::time::Duration::from_secs(3600).into()
+}
+fn d_recent() -> HumanDuration {
+    std::time::Duration::from_secs(7 * 86_400).into()
 }
 
 impl Default for Daemon {

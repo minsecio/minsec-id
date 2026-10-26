@@ -354,8 +354,10 @@ Phase 2 as built, where it differs from the plan above:
   apt, dpkg, PackageKit, rpm-ostree, bootc, and Python-run dnf 4 and
   unattended-upgrades), not by the rpm lock.
 - **Daemon findings are events, not open findings.** They are reported as
-  they happen, suppressed for `daemon.repeat` (1h), and appear in `events`
-  and the journal, not in `findings`.
+  they happen and suppressed for `daemon.repeat` (1h). `findings` lists
+  those from the last `daemon.recent` (7d), read back from the findings log
+  and grouped by fingerprint; nothing resolves them, and accepting covers
+  them as it does scan findings.
 - **`priv-escalation` hooks `commit_creds`.** A setuid exec is told apart by
   `security_bprm_committing_creds`, which runs just before it.
 - **`bpf-load`, `ptrace-attach`, and `kexec-load` report the request**

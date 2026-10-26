@@ -230,6 +230,40 @@ repeat = \"10m\"\n",
     assert!(String::from_utf8_lossy(&o.stdout).contains("daemon: not running"));
     let o = run(&dir, "clean", &["--json", "status"]);
     assert_eq!(json(&o)["daemon"]["running"], false);
+
+    // Daemon findings in the log are listed by `findings`, grouped by
+    // fingerprint, and can be shown and accepted like scan findings.
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let line = |ts: u64| {
+        format!(
+            "{{\"kind\":\"finding\",\"ts\":{ts},\"check\":\"exec-writable\",\"severity\":\"high\",\"subject\":\"/tmp/x\",\"message\":\"/tmp/x was run\",\"fingerprint\":\"00000000000000aa\"}}\n"
+        )
+    };
+    std::fs::create_dir_all(dir.join("state")).unwrap();
+    std::fs::write(
+        dir.join("state/findings.jsonl"),
+        format!("{}{}{}", line(now - 30 * 86_400), line(now - 60), line(now - 10)),
+    )
+    .unwrap();
+    let o = run(&dir, "clean", &["--json", "findings"]);
+    let list = json(&o);
+    let d = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["source"] == "daemon")
+        .expect("the daemon finding is listed");
+    assert_eq!(d["count"], 2, "the one from 30 days ago is past daemon.recent");
+    let o = run(&dir, "clean", &["status"]);
+    assert!(
+        String::from_utf8_lossy(&o.stdout).contains("1 finding(s) in the last 1w (1 high)"),
+        "{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
+    assert!(run(&dir, "clean", &["show", "00000000000000aa"]).status.success());
+    assert!(run(&dir, "clean", &["accept", "exec-writable:/tmp/*"]).status.success());
+    let o = run(&dir, "clean", &["--json", "findings"]);
+    assert!(!json(&o).as_array().unwrap().iter().any(|f| f["source"] == "daemon"));
     std::fs::remove_dir_all(dir).unwrap();
 }
 

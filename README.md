@@ -82,10 +82,13 @@ database and `/proc` to hand.
 
 Other writes under `/usr`, `/boot`, and `/etc` go to
 `/var/lib/minsec-id/dirty.list`, and the next full scan hashes those files
-whatever their ctime says. Daemon findings are events: they go to the
-findings log, the journal, and the hook as they happen, and the same finding
-is not reported again within an hour (`daemon.repeat`). `minsec-id status`
-shows the daemon's probes and counters. It uses about 2 MB of anonymous
+whatever their ctime says. Daemon findings go to the findings log, the
+journal, and the hook as they happen; the same finding is not reported again
+within an hour (`daemon.repeat`). `minsec-id findings` lists them after the
+scan's open findings, marked `[daemon: …]`, for a week (`daemon.recent`):
+they record something that happened, so no later scan resolves them. Accept
+the ones that are expected. `minsec-id status` shows the daemon's probes and
+how many kernel records it examined (execs and writes; not findings). It uses about 2 MB of anonymous
 memory and about 1 MB of BPF maps (half of it the ring buffer).
 
 ```sh

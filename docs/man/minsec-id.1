@@ -77,8 +77,9 @@ disabled), and to the notify hook.
 .B \-q
 prints nothing.
 .SS status
-The last scan, the open findings by severity, and, when the daemon is
-running, its uptime, attached probes, counters, lost events, and memory.
+The last scan, the open findings by severity, the daemon's recent findings,
+and, when it is running, its uptime, attached probes, the kernel records it
+examined (execs and writes, not findings), records lost, and memory.
 Show the last scan and counts of open findings by severity.
 .SS "findings [--all] [--severity level]"
 List open findings, most severe first.
@@ -284,14 +285,18 @@ opened.
 .PP
 Writes by the package managers (rpm, dnf, apt, dpkg, PackageKit,
 rpm-ostree, \&...) and their scriptlets are not reported.
-Daemon findings are events: they are logged, journaled, and passed to the
-hook as they happen, and the same finding is not reported again within
+Daemon findings are logged, journaled, and passed to the hook as they
+happen, and the same finding is not reported again within
 .B daemon.repeat
 (an hour).
-They are not open findings and do not appear in
-.BR findings ;
-.B events
-and the journal show them.
+.B findings
+lists those reported within
+.B daemon.recent
+(a week) after the scan's open findings, marked
+.BR [daemon:\ ...] ,
+with how many times and how recently; nothing resolves them, since they
+record something that happened.
+Accept the expected ones.
 .PP
 The daemon needs a kernel with BTF and the capabilities
 .B CAP_BPF

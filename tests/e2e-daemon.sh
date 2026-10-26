@@ -122,6 +122,8 @@ sleep 1
 "$bin" -c "$cfg" status | tee "$work/status"
 assert "status reaches the daemon" grep -q '^daemon: up' "$work/status"
 assert "every probe attached" grep -Eq ' ([0-9]+)/\1 probes' "$work/status"
+"$bin" -c "$cfg" findings >"$work/findings"
+assert "findings lists the daemon's" grep -q '^[0-9a-f]* high .*exec-memfd.*\[daemon: ' "$work/findings"
 rss=$(sed -n 's/^VmRSS:[[:space:]]*\([0-9]*\).*/\1/p' "/proc/$daemon/status")
 anon=$(sed -n 's/^RssAnon:[[:space:]]*\([0-9]*\).*/\1/p' "/proc/$daemon/status")
 echo "daemon memory: VmRSS ${rss} KiB, RssAnon ${anon} KiB"
