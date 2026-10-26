@@ -1,0 +1,41 @@
+[Unit]
+Description=minsec-id full scan
+Documentation=https://github.com/minsecio/minsec-id
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/minsec-id scan --full --quiet
+# 2 means "open findings", which is the scanner working, not failing.
+SuccessExitStatus=2
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+StateDirectory=minsec-id
+StateDirectoryMode=0700
+ConfigurationDirectory=minsec-id
+
+# The scanner runs as root so it can read everything it checks, but holds
+# only the capabilities for reading: no writes outside its state directory,
+# no module loading, no privilege changes. It deliberately does not use
+# PrivateTmp, PrivateDevices, ProtectKernelModules, or ProtectHome=yes:
+# each would hide from it something it inspects (/tmp, /dev/shm,
+# /usr/lib/modules, authorized_keys). The notify hook inherits this sandbox.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+Environment=MALLOC_ARENA_MAX=1
+MemoryMax=128M

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    systemd-tmpfiles --create minsec-id.conf >/dev/null 2>&1 || true
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        if [ -z "$2" ]; then
+            # Fresh install: scanning is read-only, so start the timers now.
+            systemctl enable --now minsec-id-scan.timer minsec-id-scan-full.timer >/dev/null 2>&1 || true
+            echo "minsec-id installed. First results after the next scan, or now: minsec-id scan"
+        fi
+    fi
+fi
+exit 0

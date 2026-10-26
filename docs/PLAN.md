@@ -84,7 +84,7 @@ crates/
   minsec-id/        bin: CLI + `scan` + `daemon` (one binary, as in minsec)
   minsec-id-bpf/    C BPF sources, vmlinux.h, build.rs → embedded objects, plus the aya loader glue
   minsec-id-sync/   bin (Phase 4)
-packaging/          units, sysusers, tmpfiles, default toml, deb/rpm scripts
+packaging/          units, tmpfiles, default toml, deb/rpm scripts (sysusers with the daemon, Phase 2)
 docs/               PLAN.md, man/ (hand-written roff, as in minsec)
 completions/        bash/zsh/fish
 tests/              fixture rootfs + e2e scripts
@@ -245,8 +245,11 @@ Program set (ring buffer 256 KB). Userspace dedupes and rate-limits per rule:
 Privileges: user `minsec-id` with `AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE
 CAP_DAC_READ_SEARCH`, using the same hardening block as `minsec.service` (adjusting
 `SystemCallFilter` for `bpf`). The scanner runs as root, but `ProtectSystem=strict`, all paths
-read-only except `/var/lib/minsec-id`, `PrivateNetwork=yes`, and a capability bounding set limited
-to the read and ptrace caps it needs.
+read-only except `/var/lib/minsec-id`, and a capability bounding set limited to the read and
+ptrace caps it needs. It does not use `PrivateNetwork` (the notify hook inherits the sandbox and
+may need the network; the binary itself has no network code), nor `PrivateTmp`,
+`PrivateDevices`, `ProtectKernelModules` or `ProtectHome=yes`: each hides something the scanner
+inspects.
 
 ---
 
@@ -277,10 +280,11 @@ Units:
 ## 5. Phases
 
 **Phase 0 (skeleton):**
-- workspace and CI: fmt, clippy `-D warnings`, tests, size and glibc gates, clang for BPF
+- workspace and CI: fmt, clippy `-D warnings`, tests, size and glibc gates (clang and the
+  `minsec-id-bpf` crate arrive with the daemon in Phase 2)
 - copied common modules, config, finding model, sinks (JSONL, journald native, exec hook)
 - `inspect`, `checks`, `check`
-- packaging stubs (units, sysusers, tmpfiles, cargo-deb / generate-rpm)
+- packaging stubs (scan units and timers, tmpfiles, cargo-deb / generate-rpm)
 - one end-to-end check: `kernel-tainted`
 
 **Phase 1 (scanner MVP):** §3.1, §3.3, §3.4 (minus `proc-hidden`), §3.5, and §3.2 for rpm and dpkg

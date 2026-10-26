@@ -1,0 +1,75 @@
+[package]
+name = "minsec-id"
+description = "Minimalist intrusion detection for modern Linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "minsec-id"
+path = "src/main.rs"
+
+[dependencies]
+minsec-id-core = { path = "../minsec-id-core" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# --- Packaging -------------------------------------------------------------
+# Built by `cargo deb` / `cargo generate-rpm`, as in minsec. The supported
+# floor is EL9 (glibc 2.34, kernel 5.14).
+
+[package.metadata.deb]
+maintainer = "Joe Cooper <swelljoe@gmail.com>"
+copyright = "©2026 Joe Cooper"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+minsec-id checks a Linux host for signs of intrusion using what the system \
+already knows: the package manager's file digests, kernel taint and security \
+state, and (optionally) eBPF. No file-hash database and nothing resident by \
+default; scans run from a systemd timer."""
+section = "admin"
+priority = "optional"
+depends = "libc6 (>= 2.34), systemd"
+assets = [
+  ["target/release/minsec-id", "usr/bin/", "755"],
+  ["../../packaging/minsec-id.toml", "etc/minsec-id/minsec-id.toml", "644"],
+  ["../../packaging/minsec-id-scan.service", "lib/systemd/system/minsec-id-scan.service", "644"],
+  ["../../packaging/minsec-id-scan.timer", "lib/systemd/system/minsec-id-scan.timer", "644"],
+  ["../../packaging/minsec-id-scan-full.service", "lib/systemd/system/minsec-id-scan-full.service", "644"],
+  ["../../packaging/minsec-id-scan-full.timer", "lib/systemd/system/minsec-id-scan-full.timer", "644"],
+  ["../../packaging/minsec-id.tmpfiles.conf", "usr/lib/tmpfiles.d/minsec-id.conf", "644"],
+  ["../../README.md", "usr/share/doc/minsec-id/README.md", "644"],
+  ["../../docs/PLAN.md", "usr/share/doc/minsec-id/PLAN.md", "644"],
+]
+conf-files = ["/etc/minsec-id/minsec-id.toml"]
+maintainer-scripts = "../../packaging/deb"
+
+[package.metadata.generate-rpm]
+license = "GPL-3.0-or-later"
+summary = "Minimalist intrusion detection for modern Linux"
+url = "https://github.com/minsecio/minsec-id"
+vendor = "Virtualmin, Inc."
+post_install_script = "../../packaging/rpm/post.sh"
+pre_uninstall_script = "../../packaging/rpm/preun.sh"
+post_uninstall_script = "../../packaging/rpm/postun.sh"
+assets = [
+  { source = "target/release/minsec-id", dest = "/usr/bin/minsec-id", mode = "755" },
+  { source = "packaging/minsec-id.toml", dest = "/etc/minsec-id/minsec-id.toml", mode = "644", config = "noreplace" },
+  { source = "packaging/minsec-id-scan.service", dest = "/usr/lib/systemd/system/minsec-id-scan.service", mode = "644" },
+  { source = "packaging/minsec-id-scan.timer", dest = "/usr/lib/systemd/system/minsec-id-scan.timer", mode = "644" },
+  { source = "packaging/minsec-id-scan-full.service", dest = "/usr/lib/systemd/system/minsec-id-scan-full.service", mode = "644" },
+  { source = "packaging/minsec-id-scan-full.timer", dest = "/usr/lib/systemd/system/minsec-id-scan-full.timer", mode = "644" },
+  { source = "packaging/minsec-id.tmpfiles.conf", dest = "/usr/lib/tmpfiles.d/minsec-id.conf", mode = "644" },
+  { source = "README.md", dest = "/usr/share/doc/minsec-id/README.md", mode = "644", doc = true },
+  { source = "docs/PLAN.md", dest = "/usr/share/doc/minsec-id/PLAN.md", mode = "644", doc = true },
+  { source = "LICENSE", dest = "/usr/share/licenses/minsec-id/LICENSE", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+systemd = "*"

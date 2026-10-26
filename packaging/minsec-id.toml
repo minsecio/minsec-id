@@ -1,0 +1,23 @@
+# minsec-id configuration. Drop-ins in conf.d/*.toml are merged over this
+# file in name order; `minsec-id enable|disable|accept` write drop-ins.
+
+[output]
+# Send findings to journald: journalctl SYSLOG_IDENTIFIER=minsec-id
+journal = true
+# Only notify (journal and exec) at or above this severity; everything is
+# still recorded in /var/lib/minsec-id/findings.jsonl.
+min_severity = "low"
+# Run once per new finding, under the scanner's sandbox: the finding is JSON
+# on stdin, and MINSEC_CHECK, MINSEC_SEVERITY, MINSEC_SUBJECT,
+# MINSEC_FINGERPRINT, MINSEC_MESSAGE are set.
+# exec = "/usr/local/bin/minsec-id-notify"
+
+# Per-check overrides; `minsec-id checks` lists them.
+# [checks.kernel-tainted]
+# enabled = true
+# severity = "high"
+
+# Accepted findings, keyed "<check>:<subject>"; a trailing * matches by
+# prefix. Prefer `minsec-id accept`, which writes conf.d/accept.toml.
+# [accept."kernel-tainted:P"]
+# reason = "NVIDIA driver"
