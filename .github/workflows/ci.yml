@@ -1,5 +1,15 @@
 name: ci
-on: [push, pull_request]
+# Pull requests are tested as PRs (merged with main); pushes only on main,
+# where there is no PR. A branch with an open PR is not tested twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+# A newer push to the same PR or branch supersedes a run still going.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
   MAX_BINARY_BYTES: 5000000
