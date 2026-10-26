@@ -69,6 +69,21 @@ pub(crate) enum Cmd {
         /// `check:subject`, as written by `accept`.
         key: String,
     },
+    /// Verify a file, or every file of a package, against the package database.
+    /// Exits 0 when intact, 2 when anything differs.
+    Verify {
+        /// An absolute path, or a package name.
+        target: String,
+    },
+    /// Show the recorded baselines, or reset them after reviewing a change.
+    Baseline {
+        /// Forget the baselines; the next scan records the current state.
+        #[arg(long)]
+        reset: bool,
+        /// Only this check's baseline (repeatable).
+        #[arg(long = "check", value_name = "ID")]
+        checks: Vec<String>,
+    },
     /// List checks, with cost and availability on this host.
     Checks,
     /// Enable a check (writes conf.d/<check>.toml).

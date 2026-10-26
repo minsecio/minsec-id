@@ -19,6 +19,9 @@ pub struct State {
     /// Open findings by fingerprint, including accepted ones.
     #[serde(default)]
     pub open: BTreeMap<String, OpenFinding>,
+    /// Per-check baselines (see `check::Anchors`).
+    #[serde(default)]
+    pub anchors: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl Default for State {
@@ -27,6 +30,7 @@ impl Default for State {
             version: STATE_VERSION,
             last_scan: None,
             open: BTreeMap::new(),
+            anchors: BTreeMap::new(),
         }
     }
 }

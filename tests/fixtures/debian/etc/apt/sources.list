@@ -1,0 +1,2 @@
+deb http://deb.debian.org/debian bookworm main
+deb [trusted=yes] http://packages.example.net/ ./

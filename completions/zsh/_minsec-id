@@ -1,0 +1,147 @@
+#compdef minsec-id
+
+# Zsh completion for minsec-id.
+#
+# Subcommands and options are static; check ids come from `minsec-id checks`
+# and findings from `minsec-id findings` at completion time. Data queries
+# fail silently, e.g. when the state directory is not readable.
+
+# Config dir arguments for data queries, from -c/--config-dir on the line.
+# minsec_id_cmd and minsec_id_global_args are set by _minsec-id; opt_args
+# holds the options parsed after the subcommand.
+_minsec_id_config_args() {
+    local dir
+    for dir in $opt_args[--config-dir] $opt_args[-c] \
+        $minsec_id_global_args[--config-dir] $minsec_id_global_args[-c]; do
+        print -r -- --config-dir ${(Q)dir}
+        return
+    done
+}
+
+# Check ids with descriptions. The last argument selects all, enabled, or
+# disabled checks; the rest are compadd options from _arguments.
+_minsec_id_checks() {
+    local line want=$argv[-1]
+    local -a checks
+    for line in ${(f)"$(_call_program checks $minsec_id_cmd $(_minsec_id_config_args) checks 2>/dev/null |
+            awk -v want="$want" '
+                $1 == "*" { if (want == "disabled") next; n = $2; s = 4 }
+                $1 != "*" { if (want == "enabled") next; n = $1; s = 3 }
+                { d = ""; for (i = s; i <= NF; i++) d = d (i > s ? " " : "") $i; print n "\t" d }')"}; do
+        checks+=("${line%%$'\t'*}:${${line#*$'\t'}//:/\\:}")
+    done
+    _describe -t checks 'check' checks "${(@)argv[1,-2]}"
+}
+
+# Findings as check:subject keys; the last argument is open or all.
+_minsec_id_findings() {
+    local -a keys
+    local all=
+    [[ $argv[-1] == all ]] && all=--all
+    keys=(${(f)"$(_call_program findings $minsec_id_cmd $(_minsec_id_config_args) findings $all 2>/dev/null | awk '{ print $3 }')"})
+    _wanted findings expl 'finding' compadd "${(@)argv[1,-2]}" -a keys
+}
+
+# Accept rules in effect.
+_minsec_id_accepted() {
+    local -a keys
+    keys=(${(f)"$(_call_program accepted $minsec_id_cmd $(_minsec_id_config_args) findings --all 2>/dev/null |
+        sed -n 's/.*(accepted: \(.*\))$/\1/p' | sort -u)"})
+    _wanted accepted expl 'accept rule' compadd "$@" -a keys
+}
+
+_minsec_id_commands() {
+    local -a commands=(
+        'scan:Run checks'
+        'status:Last scan and open findings'
+        'findings:List open findings'
+        'show:Show one finding in full'
+        'accept:Accept a finding'
+        'unaccept:Remove an accept rule'
+        'verify:Verify a file or package against the package database'
+        'baseline:Show or reset the recorded baselines'
+        'checks:List checks'
+        'enable:Enable a check'
+        'disable:Disable a check'
+        'inspect:Report host capabilities, configuration sources, and checks'
+        'check:Validate configuration'
+        'events:Print the findings log'
+        'help:Print help for a subcommand'
+    )
+    _describe -t commands 'minsec-id command' commands
+}
+
+_minsec-id() {
+    local curcontext=$curcontext state line ret=1
+    # _arguments rewrites $words for subcommands, so keep the command itself.
+    local minsec_id_cmd=$words[1]
+    typeset -A opt_args
+    local -a global_opts=(
+        '(-c --config-dir)'{-c,--config-dir}'[Configuration directory]:directory:_files -/'
+        '--json[Machine-readable JSON output]'
+        '(- : *)'{-h,--help}'[Print help]'
+    )
+    local severity='--severity[Only findings at or above this severity]:severity:(info low medium high critical)'
+
+    _arguments -C $global_opts \
+        '(- : *)'{-V,--version}'[Print version]' \
+        '1: :_minsec_id_commands' \
+        '*::: :->args' && ret=0
+
+    case $state in
+        args)
+            words=($line[1] "${words[@]}")
+            ((CURRENT++))
+            local -A minsec_id_global_args=("${(@kv)opt_args}")
+            curcontext=${curcontext%:*:*}:minsec-id-$line[1]:
+            case $line[1] in
+                scan)
+                    _arguments $global_opts \
+                        '(--quick)--full[Run every enabled check, including ones that read file contents]' \
+                        '(--full)--quick[Run only cheap checks]' \
+                        '*--check[Run only this check]:check:_minsec_id_checks all' \
+                        '(-q --quiet)'{-q,--quiet}'[Print nothing]' && ret=0
+                    ;;
+                findings)
+                    _arguments $global_opts '--all[Include accepted findings]' $severity && ret=0
+                    ;;
+                show)
+                    _arguments $global_opts '1:finding:_minsec_id_findings all' && ret=0
+                    ;;
+                accept)
+                    _arguments $global_opts '--reason[Why it is accepted]:reason' \
+                        '1:finding:_minsec_id_findings open' && ret=0
+                    ;;
+                unaccept)
+                    _arguments $global_opts '1:accept rule:_minsec_id_accepted' && ret=0
+                    ;;
+                verify)
+                    _arguments $global_opts '1:path or package:_files' && ret=0
+                    ;;
+                baseline)
+                    _arguments $global_opts '--reset[Forget the baselines]' \
+                        '*--check[Only this check]:check:_minsec_id_checks all' && ret=0
+                    ;;
+                enable)
+                    _arguments $global_opts '1:check:_minsec_id_checks disabled' && ret=0
+                    ;;
+                disable)
+                    _arguments $global_opts '1:check:_minsec_id_checks enabled' && ret=0
+                    ;;
+                events)
+                    _arguments $global_opts \
+                        '(-n --last)'{-n,--last}'[Number of events to print]:count' && ret=0
+                    ;;
+                help)
+                    _arguments '1: :_minsec_id_commands' && ret=0
+                    ;;
+                *)
+                    _arguments $global_opts && ret=0
+                    ;;
+            esac
+            ;;
+    esac
+    return ret
+}
+
+_minsec-id "$@"

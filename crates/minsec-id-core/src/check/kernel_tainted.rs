@@ -3,7 +3,7 @@
 //! finding is scoped to the boot: the same flag re-reports after a reboot only
 //! if it is set again.
 
-use super::{Check, Cost, Ctx};
+use super::{Anchors, Check, Cost, Ctx};
 use crate::finding::{Finding, Severity};
 use crate::host::Host;
 
@@ -58,7 +58,7 @@ impl Check for KernelTainted {
         (!host.exists(TAINTED)).then(|| format!("{TAINTED} is missing"))
     }
 
-    fn run(&self, ctx: &Ctx) -> anyhow::Result<Vec<Finding>> {
+    fn run(&self, ctx: &Ctx, _: &mut Anchors) -> anyhow::Result<Vec<Finding>> {
         let host = ctx.host;
         let raw = host.read_trim(TAINTED).map_err(|e| anyhow::anyhow!("{TAINTED}: {e}"))?;
         let mask: u64 = raw

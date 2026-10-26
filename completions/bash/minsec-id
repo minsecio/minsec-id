@@ -1,0 +1,155 @@
+# shellcheck shell=bash
+# Bash completion for minsec-id.
+#
+# Subcommands and options are static; check ids come from `minsec-id checks`
+# and findings from `minsec-id findings` at completion time. Data queries
+# fail silently, e.g. when the state directory is not readable.
+
+# Set config_dir in the caller from any -c/--config-dir on the command line so
+# data queries look at the same configuration the user is about to operate on.
+_minsec_id_config_dir() {
+    local i
+    config_dir=
+    for ((i = 1; i < cword; i++)); do
+        case ${words[i]} in
+            -c | --config-dir) config_dir=${words[i + 1]-} ;;
+            --config-dir=*) config_dir=${words[i]#--config-dir=} ;;
+        esac
+    done
+}
+
+# Run a minsec-id data query with the user's config dir.
+_minsec_id_query() {
+    local config_dir
+    _minsec_id_config_dir
+    if [[ -n $config_dir ]]; then
+        "$1" --config-dir "$config_dir" "${@:2}" 2>/dev/null
+    else
+        "$@" 2>/dev/null
+    fi
+}
+
+# Check ids: $1 is the minsec-id command, $2 selects all, enabled, or disabled.
+_minsec_id_checks() {
+    _minsec_id_query "$1" checks | awk -v want="$2" '
+        $1 == "*" { if (want != "disabled") print $2; next }
+        { if (want != "enabled") print $1 }'
+}
+
+# Open findings as check:subject keys; $2 = all includes accepted ones.
+_minsec_id_findings() {
+    if [[ $2 == all ]]; then
+        _minsec_id_query "$1" findings --all | awk '{ print $3 }'
+    else
+        _minsec_id_query "$1" findings | awk '{ print $3 }'
+    fi
+}
+
+# Accept rules in effect, from the "(accepted: KEY)" note.
+_minsec_id_accepted() {
+    _minsec_id_query "$1" findings --all | sed -n 's/.*(accepted: \(.*\))$/\1/p' | sort -u
+}
+
+_minsec_id() {
+    local cur prev words cword
+    if declare -F _init_completion >/dev/null; then
+        _init_completion -n := || return
+    else
+        words=("${COMP_WORDS[@]}") cword=$COMP_CWORD
+        cur=${words[cword]} prev=${words[cword - 1]}
+    fi
+
+    local subcommands='scan status findings show accept unaccept verify baseline checks enable disable inspect check events help'
+    local global_opts='-c --config-dir --json -h --help'
+
+    # Locate the subcommand and count the positional arguments after it.
+    local i cmd='' positionals=0
+    for ((i = 1; i < cword; i++)); do
+        case ${words[i]} in
+            -c | --config-dir | --check | --severity | --reason | -n | --last) ((i++)) ;;
+            -*) ;;
+            *) if [[ -z $cmd ]]; then cmd=${words[i]}; else ((positionals++)); fi ;;
+        esac
+    done
+
+    # Values for options that take one.
+    case $prev in
+        -c | --config-dir)
+            mapfile -t COMPREPLY < <(compgen -d -- "$cur")
+            compopt -o filenames 2>/dev/null
+            return
+            ;;
+        --check)
+            mapfile -t COMPREPLY < <(compgen -W "$(_minsec_id_checks "$1" all)" -- "$cur")
+            return
+            ;;
+        --severity)
+            mapfile -t COMPREPLY < <(compgen -W 'info low medium high critical' -- "$cur")
+            return
+            ;;
+        --reason | -n | --last) return ;;
+    esac
+
+    if [[ $cur == -* ]]; then
+        local opts=$global_opts
+        case $cmd in
+            '') opts+=' -V --version' ;;
+            scan) opts+=' --full --quick --check -q --quiet' ;;
+            findings) opts+=' --all --severity' ;;
+            accept) opts+=' --reason' ;;
+            baseline) opts+=' --reset --check' ;;
+            events) opts+=' -n --last' ;;
+        esac
+        mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
+        return
+    fi
+
+    if [[ -z $cmd ]]; then
+        mapfile -t COMPREPLY < <(compgen -W "$subcommands" -- "$cur")
+        return
+    fi
+    case $cmd in
+        enable)
+            if ((positionals == 0)); then
+                mapfile -t COMPREPLY < <(compgen -W "$(_minsec_id_checks "$1" disabled)" -- "$cur")
+            fi
+            ;;
+        disable)
+            if ((positionals == 0)); then
+                mapfile -t COMPREPLY < <(compgen -W "$(_minsec_id_checks "$1" enabled)" -- "$cur")
+            fi
+            ;;
+        show | accept)
+            if ((positionals == 0)); then
+                local which=open
+                [[ $cmd == show ]] && which=all
+                mapfile -t COMPREPLY < <(compgen -W "$(_minsec_id_findings "$1" $which)" -- "$cur")
+                # Keys contain colons, which Bash treats as word breaks.
+                if declare -F __ltrim_colon_completions >/dev/null; then
+                    __ltrim_colon_completions "$cur"
+                fi
+            fi
+            ;;
+        unaccept)
+            if ((positionals == 0)); then
+                mapfile -t COMPREPLY < <(compgen -W "$(_minsec_id_accepted "$1")" -- "$cur")
+                if declare -F __ltrim_colon_completions >/dev/null; then
+                    __ltrim_colon_completions "$cur"
+                fi
+            fi
+            ;;
+        verify)
+            if ((positionals == 0)); then
+                mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+                compopt -o filenames 2>/dev/null
+            fi
+            ;;
+        help)
+            if ((positionals == 0)); then
+                mapfile -t COMPREPLY < <(compgen -W "$subcommands" -- "$cur")
+            fi
+            ;;
+    esac
+}
+
+complete -F _minsec_id minsec-id

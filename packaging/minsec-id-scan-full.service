@@ -16,15 +16,18 @@ ConfigurationDirectory=minsec-id
 
 # The scanner runs as root so it can read everything it checks, but holds
 # only the capabilities for reading: no writes outside its state directory,
-# no module loading, no privilege changes. It deliberately does not use
-# PrivateTmp, PrivateDevices, ProtectKernelModules, or ProtectHome=yes:
-# each would hide from it something it inspects (/tmp, /dev/shm,
-# /usr/lib/modules, authorized_keys). The notify hook inherits this sandbox.
-CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+# no module loading, no privilege changes. CAP_SYS_PTRACE reads other
+# processes' /proc entries; CAP_SYS_ADMIN is what the kernel requires to
+# enumerate loaded BPF programs. It deliberately does not use PrivateTmp,
+# PrivateDevices, ProtectKernelModules, ProtectKernelTunables, or
+# ProtectHome=yes: each hides from it something it inspects (/tmp,
+# /dev/shm, /usr/lib/modules, /proc/kallsyms, authorized_keys).
+# The notify hook inherits this sandbox.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_SYS_ADMIN
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ProtectKernelTunables=true
+ReadOnlyPaths=/proc/sys /sys
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
@@ -36,6 +39,7 @@ MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+SystemCallFilter=bpf
 RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
 Environment=MALLOC_ARENA_MAX=1
 MemoryMax=128M

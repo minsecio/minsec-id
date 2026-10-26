@@ -127,8 +127,8 @@ pub fn inspect(config_dir: &Path, host: &Host, version: &str) -> anyhow::Result<
         os: os_release(host),
         kernel,
         packages: Packages {
-            rpm: host.exists("/usr/lib/sysimage/rpm") || host.exists("/var/lib/rpm/rpmdb.sqlite"),
-            dpkg: host.exists("/var/lib/dpkg/status"),
+            rpm: crate::pkgdb::has_rpm(host),
+            dpkg: crate::pkgdb::has_dpkg(host),
             flatpak: host.exists("/var/lib/flatpak/repo"),
             snap: host.exists("/var/lib/snapd/state.json"),
         },
@@ -198,7 +198,7 @@ fn bracketed(s: &str) -> Option<String> {
 }
 
 /// The SecureBoot variable is 4 attribute bytes followed by a 1-byte value.
-fn secure_boot(host: &Host) -> bool {
+pub fn secure_boot(host: &Host) -> bool {
     host.read(SECURE_BOOT_VAR)
         .ok()
         .and_then(|b| b.get(4).copied())

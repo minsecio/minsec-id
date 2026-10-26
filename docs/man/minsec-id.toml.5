@@ -1,0 +1,124 @@
+.TH MINSEC-ID.TOML 5 "2026-10-26" "minsec-id" "File Formats"
+.SH NAME
+minsec-id.toml \- minsec-id configuration
+.SH SYNOPSIS
+.I /etc/minsec-id/minsec-id.toml
+.br
+.I /etc/minsec-id/conf.d/*.toml
+.SH DESCRIPTION
+.B minsec-id
+reads
+.I minsec-id.toml
+and then merges every
+.I conf.d/*.toml
+drop-in over it in name order: tables merge key by key, other values replace
+earlier ones.
+A missing main file means defaults.
+Unknown keys are errors;
+.B minsec-id check
+validates the result.
+.PP
+.BR "minsec-id enable" ,
+.BR disable ,
+and
+.B accept
+write drop-ins
+.RI ( conf.d/ check .toml
+and
+.IR conf.d/accept.toml ).
+.SH DURATIONS
+Durations are strings such as
+.BR 30s ,
+.BR 10m ,
+.BR 1h30m ,
+.BR 2d ,
+or
+.BR 1w ,
+or a number of seconds.
+.SH OUTPUT TABLE
+.TP
+.BR journal " (boolean, default " true )
+Send new and resolved findings to journald.
+.TP
+.BR exec " (string)"
+A command run with
+.B /bin/sh \-c
+once per new finding, with the finding as JSON on standard input and
+.BR MINSEC_CHECK ,
+.BR MINSEC_SEVERITY ,
+.BR MINSEC_SUBJECT ,
+.BR MINSEC_FINGERPRINT ,
+and
+.B MINSEC_MESSAGE
+in the environment.
+It is killed after 30 seconds and runs inside the scan service's sandbox.
+.TP
+.BR min_severity " (default " low )
+Notify (journal and
+.BR exec )
+only at or above this severity:
+.BR info ,
+.BR low ,
+.BR medium ,
+.BR high ,
+or
+.BR critical .
+Everything is still written to the findings log.
+.SH SCAN TABLE
+.TP
+.BR sample_days " (integer, default " 7 )
+Full scans re-hash every packaged file over this many days, one slice a day,
+in addition to files with evidence of change.
+.TP
+.BR ctime_slack " (duration, default " 1h )
+A packaged file whose ctime is this much newer than its package's install
+time has changed since install and is hashed.
+.SH PATHS TABLE
+.TP
+.BR state_dir " (default " /var/lib/minsec-id )
+Where state, the findings log, and the verified-file cache live.
+.TP
+.BR socket " (default " /run/minsec-id/minsec-id.sock )
+Reserved for the optional daemon.
+.SH CHECKS TABLES
+.TP
+.B [checks.\fIid\fB]
+.RS
+.TP
+.BR enabled " (boolean)"
+Override the check's default.
+.TP
+.BR severity
+Replace the severity of every finding the check emits.
+.RE
+.SH ACCEPT TABLES
+.TP
+.B [accept."\fIcheck\fB:\fIsubject\fB"]
+Accept findings with this id and subject; a subject ending in
+.B *
+matches by prefix.
+.RS
+.TP
+.BR reason " (string)"
+Why, for whoever reads the file next.
+.RE
+.SH EXAMPLE
+.nf
+[output]
+min_severity = "medium"
+exec = "/usr/local/bin/page-oncall"
+
+[scan]
+sample_days = 14
+
+[checks.ftrace-hooks]
+enabled = false
+
+[accept."kernel-tainted:P"]
+reason = "NVIDIA driver"
+
+[accept."exe-unowned:/usr/bin/vendor-*"]
+reason = "installed by the vendor's tarball"
+.fi
+.SH SEE ALSO
+.BR minsec-id (1)

