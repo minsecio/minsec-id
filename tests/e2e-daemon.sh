@@ -35,7 +35,8 @@ assert() {
 	if "$@"; then pass "$what"; else bad "$what"; fi
 }
 
-"$bin" -c "$cfg" daemon 2>"$work/daemon.log" &
+# Debug logging records every kernel record examined, for diagnosing a miss.
+MINSEC_ID_LOG=debug "$bin" -c "$cfg" daemon 2>"$work/daemon.log" &
 daemon=$!
 for _ in $(seq 600); do
 	[ -S "$work/daemon.sock" ] && break
@@ -90,7 +91,15 @@ x86_64) nr=320 ;;
 aarch64) nr=294 ;;
 *) nr= ;;
 esac
+# kexec-load: both syscalls; each fails on bad arguments, and the attempt is
+# enough.
+case $arch in
+x86_64) nr_load=246 ;;
+aarch64) nr_load=104 ;;
+*) nr_load= ;;
+esac
 [ -n "$nr" ] && "$py" -c "import ctypes; ctypes.CDLL(None).syscall($nr, -1, -1, 0, 0, 0)"
+[ -n "$nr_load" ] && "$py" -c "import ctypes; ctypes.CDLL(None).syscall($nr_load, 0, 0, 0, 0)"
 # bpf-load: a kprobe program load request (it fails verification; the request is enough).
 "$py" - <<'EOF'
 import ctypes
@@ -110,13 +119,28 @@ os.execv("/bin/sh", ["sh", "-c", "exit 0"])'
 
 # The scanner, while the daemon runs: its BPF view of processes, and the
 # daemon's own programs and trampolines, which are not findings.
-for c in proc-hidden bpf-prog-unknown ftrace-hooks; do
-	if "$bin" -c "$cfg" --json scan --check $c >"$work/scan.json"; then
-		pass "$c: clean"
-	else
-		bad "$c: $(cat "$work/scan.json")"
-	fi
-done
+# Another BPF agent may really be on the host (CI runners have one), so
+# these assert only that minsec-id's own programs and hooks are not what is
+# reported.
+if "$bin" -c "$cfg" --json scan --check proc-hidden >"$work/scan.json"; then
+	pass "proc-hidden: clean"
+else
+	bad "proc-hidden: $(cat "$work/scan.json")"
+fi
+"$bin" -c "$cfg" --json scan --check bpf-prog-unknown >"$work/bpf.json"
+if grep -q '"subject":"[a-z_]*/msid_' "$work/bpf.json"; then
+	bad "bpf-prog-unknown reports minsec-id's own programs: $(cat "$work/bpf.json")"
+else
+	pass "bpf-prog-unknown: own programs not reported"
+fi
+others=$(grep -o '"subject":"[a-z_]*/[^"]*"' "$work/bpf.json" | sort -u)
+[ -n "$others" ] && echo "note: other BPF programs on this host: $others"
+"$bin" -c "$cfg" --json scan --check ftrace-hooks >"$work/ftrace.json"
+if [ -z "$others" ] && grep -q '"check":"ftrace-hooks","severity":"[a-z]*","subject":"bpf"' "$work/ftrace.json"; then
+	bad "ftrace-hooks reports minsec-id's own trampolines: $(cat "$work/ftrace.json")"
+else
+	pass "ftrace-hooks: own trampolines not reported"
+fi
 
 sleep 1
 "$bin" -c "$cfg" status | tee "$work/status"
@@ -160,8 +184,8 @@ if grep -q '"check":"bpf-load".*msid_' "$log"; then bad "minsec-id's own BPF rep
 
 rm -rf /usr/share/minsec-e2e
 if [ $fail != 0 ]; then
-	echo "--- daemon log"
-	cat "$work/daemon.log"
+	echo "--- daemon log (kexec, bpf, and creds records; exec and write are many)"
+	grep -Ev '^ *DEBUG (exec|write) ' "$work/daemon.log"
 	echo "--- findings"
 	cat "$log"
 fi
