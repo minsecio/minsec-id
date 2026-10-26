@@ -21,6 +21,7 @@ pub mod procfs;
 pub mod scan;
 pub mod sink;
 pub mod state;
+pub mod sysext;
 pub mod users;
 
 pub use config::Config;

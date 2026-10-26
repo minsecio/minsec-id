@@ -7,7 +7,8 @@
 #   tests/vm/run.sh SCRIPT [ARGS...]
 #
 # SCRIPT runs inside the VM with the current directory set to the repo; its
-# output appears on stdout and its exit status is this script's.
+# output appears on stdout and its exit status is this script's. VM_APPEND
+# adds kernel command-line arguments (e.g. ima_policy=tcb).
 set -euo pipefail
 
 script=$(realpath "$1")
@@ -81,7 +82,7 @@ out=$work/console
 timeout "${VM_TIMEOUT:-300}" qemu-system-x86_64 \
 	-enable-kvm -cpu host -smp 2 -m 2G -nographic -no-reboot \
 	-kernel "$kernel" -initrd "$work/initramfs.cpio" \
-	-append "console=ttyS0 quiet loglevel=3 panic=-1 rdinit=/init minsec.repo=$repo minsec.script=$wrapper" \
+	-append "console=ttyS0 quiet loglevel=3 panic=-1 rdinit=/init minsec.repo=$repo minsec.script=$wrapper ${VM_APPEND:-}" \
 	-virtfs local,path=/,mount_tag=hostroot,security_model=none,readonly=on,multidevs=remap \
 	</dev/null | tee "$out" | tr -d "\r" | sed -un "/VM-START$/,/^VM-EXIT-STATUS=/{/VM-START$/d;/^VM-EXIT-STATUS=/d;p}" || true
 status=$(grep -ao 'VM-EXIT-STATUS=[0-9]*' "$out" | tail -1 | cut -d= -f2)

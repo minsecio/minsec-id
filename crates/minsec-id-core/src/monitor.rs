@@ -484,6 +484,17 @@ impl Engine {
         Some(false)
     }
 
+    /// Whether `path` is a file a merged system extension provides: the
+    /// `sysext` check reports extensions, not each file they bring.
+    fn is_extension_file(&self, path: &str) -> bool {
+        if !path.starts_with("/usr/") {
+            return false;
+        }
+        let mounts = crate::procfs::mounts(&self.host);
+        crate::sysext::Layers::usr(&self.host, &mounts)
+            .is_some_and(|l| std::fs::metadata(self.host.path(path)).is_ok_and(|m| l.is_extension_file(path, &m)))
+    }
+
     pub fn handle(&mut self, ev: &Event, now: u64) -> Outcome {
         *self.stats.events.entry(ev.kind.as_str().into()).or_default() += 1;
         tracing::debug!(
@@ -673,6 +684,7 @@ impl Engine {
             && system_path(&path)
             && self.owns(&path) == Some(false)
             && !self.in_transaction(ev.pid, ev.ppid)
+            && !self.is_extension_file(&path)
         {
             verdict = Some((
                 "exec-unowned",

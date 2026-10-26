@@ -386,6 +386,49 @@ Phase 2 as built, where it differs from the plan above:
 - systemd-sysext images and dm-verity status
 - IMA measurement list as a free source of hashes for executed files, where a policy is active
 
+Phase 3 as built, where it differs from the plan above:
+- **ostree is read natively** (`ostree.rs`: just enough GVariant for commit,
+  dirtree, dirmeta, and detached metadata, and the content checksum of a
+  file object), not through `ostree fsck`. A checkout's files are hard links
+  to its objects, so verification is a stat walk plus hashing on evidence,
+  shared by flatpak and ostree systems (`check/checkout.rs`).
+- **The ctime line is the previous scan's newest deployment.** A deployment
+  links every object again, moving its ctime; drawing the line at the
+  current newest deployment would let a change made just before one hide
+  behind it. So each new deployment's objects are hashed once.
+- **flatpak signatures are checked with `gpgv`** (GnuPG's verify-only tool,
+  present wherever flatpak is), against the remote's `trustedkeys.gpg`.
+  Commits from OCI remotes have no signature and are not checked; the
+  exported files flatpak rewrites (`export/`) are not compared.
+- **snap assertions are read from snapd's database**, not `snap known`
+  (which needs snapd running). Their signatures are not verified; snapd did
+  when it fetched them.
+- **On ostree systems `pkg-verify` is unavailable** (the rpm database
+  describes packages, not the composed tree) and the booted commit is an
+  owner in the package database, so files composed into the image are not
+  "unowned". There is no `ostree admin config-diff` check: `persistence`
+  covers the parts of `/etc` that matter. The composefs image has no digest
+  in Fedora CoreOS's commits, so each deployment's is recorded when first
+  seen.
+- **The staged deployment is read from `/run/ostree/staged-deployment`**,
+  and any deployment newer than the booted one, so a switch to another
+  image is reported before the reboot that would run it.
+- **IMA measurements are compared only for packages installed before the
+  boot** (a measurement of a file updated since may be of either version)
+  and honour rpm's `%verify`. Only rpm's SHA-256 digests can be compared.
+- **sysext attribution** uses overlayfs's layer marks (a device per lower
+  filesystem, or "xino" inode bits) and, for directory extensions on the
+  base's filesystem, the extension's own tree.
+- **Kernel taint from signed, packaged modules** (`P`, `O`: Ubuntu's zfs, a
+  packaged NVIDIA driver) is reported as info.
+- **systemd-nsresourced's `userns_restrict` programs** (systemd 258+), and
+  the kprobe they attach, are explained only while systemd's binaries alone
+  hold them.
+- **Tested** in VMs of the distributions' own cloud images
+  (`tests/vm/cloud.sh`): Ubuntu 24.04 for snap and sysext, Fedora CoreOS 44
+  (composefs) for ostree, sysext, and IMA (`ima_policy=tcb`); flatpak in the
+  host-kernel VM. CI runs the flatpak, snap, and sysext tests on its runner.
+
 **Phase 4 (minsec.io integration):**
 - `minsec-id-sync` with the same enrollment flow (PoW + Ed25519, `minsec-proto`)
 - Data sent:

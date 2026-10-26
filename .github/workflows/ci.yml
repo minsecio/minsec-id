@@ -61,3 +61,7 @@ jobs:
           sudo tests/e2e-flatpak.sh target/release/minsec-id
       - name: snap end to end
         run: sudo tests/e2e-snap.sh target/release/minsec-id
+      - name: system extensions end to end
+        run: |
+          sudo apt-get install -y squashfs-tools
+          sudo tests/e2e-sysext.sh target/release/minsec-id

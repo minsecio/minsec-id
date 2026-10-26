@@ -12,6 +12,8 @@
 # read-only at /run/repo (9p; / may be read-only) and SCRIPT runs there as root, with network
 # through qemu's user mode. Its output appears on stdout and its exit
 # status is this script's. VM_TIMEOUT (seconds, default 900) bounds a run.
+# VM_KARGS adds kernel arguments (fcos only: Ignition sets them and reboots
+# once before the script runs).
 set -euo pipefail
 
 image=$1
@@ -89,7 +91,7 @@ fcos)
 	fi
 	disk=$cache/$name
 	# Ignition: a unit that runs the script once the system is up.
-	python3 - "$runner" >"$work/config.ign" <<'EOF'
+	python3 - "$runner" "${VM_KARGS:-}" >"$work/config.ign" <<'EOF'
 import json, sys
 unit = """[Unit]
 After=network-online.target
@@ -100,10 +102,13 @@ ExecStart=/bin/bash -c %s
 [Install]
 WantedBy=multi-user.target
 """ % json.dumps(sys.argv[1])
-print(json.dumps({
+config = {
     "ignition": {"version": "3.4.0"},
     "systemd": {"units": [{"name": "minsec-id-test.service", "enabled": True, "contents": unit}]},
-}))
+}
+if sys.argv[2]:
+    config["kernelArguments"] = {"shouldExist": sys.argv[2].split()}
+print(json.dumps(config))
 EOF
 	extra=(-fw_cfg "name=opt/com.coreos/config,file=$work/config.ign")
 	fmt=qcow2
@@ -116,7 +121,7 @@ esac
 
 timeout "${VM_TIMEOUT:-900}" qemu-system-x86_64 \
 	-machine q35,accel=kvm -cpu host -m 3072 -smp 2 \
-	-display none -no-reboot -snapshot \
+	-display none -snapshot \
 	-drive "file=$disk,if=virtio,format=$fmt" \
 	"${extra[@]}" \
 	-virtfs "local,path=$repo,mount_tag=repo,security_model=none,readonly=on" \

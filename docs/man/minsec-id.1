@@ -225,6 +225,67 @@ login and authentication logs truncated in place.
 Processes the kernel runs that the
 .I /proc
 listing omits, from a BPF task iterator.
+.TP
+.BR ima-verify " (emits " ima-mismatch )
+Files the kernel's IMA measurement list records with content other than
+their package's, where a measurement policy is active (for example
+.BR ima_policy=tcb ).
+The list is append-only for the boot, so a file changed and changed back
+still shows. Files whose package was installed during the boot, and files
+rpm does not verify the digest of, are not compared.
+.TP
+.BR flatpak-verify " (emits " flatpak-modified ", " flatpak-missing )
+Deployed flatpak apps and runtimes of the system installation against their
+ostree commits: files changed, replaced, added, or missing, and symlinks
+retargeted (full scans). Objects are hashed when their ctime is newer than
+the newest deployment the previous scan saw, or in the rolling sample.
+.TP
+.B flatpak-signatures
+Deployed flatpak commits from a remote that requires signatures, checked
+with
+.BR gpgv (1)
+against the remote's keyring. Commits from OCI remotes carry no signature.
+.TP
+.BR snap-verify " (emits " snap-modified ", " snap-unasserted )
+Installed snaps against the store's
+.B snap-revision
+assertions: the size always, the SHA3-384 when the file's ctime moved or in
+the rolling sample (full scans). Snaps installed from a file without
+assertions are
+.BR snap-unasserted .
+.TP
+.B snap-mounts
+Each
+.I /snap/NAME/REV
+mounted from its own
+.I .snap
+file, still present.
+.TP
+.BR ostree-verify " (emits " ostree-modified ", " ostree-missing )
+On an ostree-booted system, the booted deployment's
+.I /usr
+against its commit (full scans). It replaces
+.B pkg-verify
+there.
+.TP
+.B ostree-deployment
+On an ostree-booted system: the image or ref the deployment follows
+changing, image transports without signature verification, a staged
+deployment of something else, an unlocked
+.IR /usr ,
+the composefs image changing after deployment, and packages layered on, or
+removed from, the image.
+.TP
+.BR sysext " (emits " sysext-changed )
+System and configuration extensions merged over
+.IR /usr ,
+.IR /opt ,
+or
+.IR /etc :
+each new one, more severely when it is a directory or an image without
+dm-verity, and any later change to its content. Programs an extension
+provides are not reported by
+.BR exe-unowned .
 .SH DAEMON
 The daemon loads BPF programs that filter in the kernel and send records
 through one ring buffer; its rules judge them in userspace.
@@ -356,6 +417,11 @@ re-hashed until it moves again.
 .I /var/lib/minsec-id/dirty.list
 System files the daemon saw written outside package transactions; the next
 full scan hashes them.
+.TP
+.IR /var/lib/minsec-id/flatpak-verified.bin ", " ostree-verified.bin ", " snap-verified.bin
+The same as
+.I verified.bin
+for flatpak and ostree objects and for snaps.
 .TP
 .I /run/minsec-id/minsec-id.sock
 The daemon's control socket (root only).

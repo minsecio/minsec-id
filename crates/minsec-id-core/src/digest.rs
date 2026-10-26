@@ -9,7 +9,7 @@ use std::io::Read;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Algo {
     Md5,
     Sha256,
