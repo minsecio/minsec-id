@@ -150,7 +150,46 @@ fn is_minsec_id(holder: &serde_json::Value) -> bool {
         .is_some_and(|e| e.rsplit('/').next() == Some("minsec-id"))
 }
 
+/// Programs a systemd service loads and keeps open (systemd-nsresourced's
+/// user namespace restrictions). Known only while systemd's own binaries are
+/// all that hold them.
+const SYSTEMD_HELD: &[&str] = &["userns_restrict"];
+
+fn is_systemd(holder: &serde_json::Value) -> bool {
+    holder["exe"]
+        .as_str()
+        .is_some_and(|e| e.starts_with("/usr/lib/systemd/") && !e.ends_with(" (deleted)"))
+}
+
 type Holders = HashMap<u32, Vec<serde_json::Value>>;
+
+/// Kernel functions systemd's kprobe programs attach to (nsresourced's
+/// `kprobe/free_user_ns`), by program name.
+const SYSTEMD_KPROBES: &[(&str, &str)] = &[("userns_restrict", "free_user_ns")];
+
+/// Functions hooked by kprobe that a systemd-held program explains: shown
+/// by ftrace as kprobes, not BPF trampolines.
+pub(crate) fn explained_kprobes(host: &Host) -> Vec<&'static str> {
+    let Ok(progs) = programs() else {
+        return Vec::new();
+    };
+    let wanted: Vec<&ProgInfo> = progs
+        .iter()
+        .filter(|p| p.kind == "kprobe" && SYSTEMD_KPROBES.iter().any(|(n, _)| *n == p.name))
+        .collect();
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    let held = holders(host);
+    wanted
+        .into_iter()
+        .filter(|p| {
+            held.get(&p.id)
+                .is_some_and(|by| !by.is_empty() && by.iter().all(is_systemd))
+        })
+        .filter_map(|p| SYSTEMD_KPROBES.iter().find(|(n, _)| *n == p.name).map(|(_, f)| *f))
+        .collect()
+}
 
 /// Tracing-kind programs nothing known explains, and who holds each
 /// program. A `msid_` name is minsec-id's only if a minsec-id process
@@ -167,9 +206,12 @@ pub(crate) fn unexplained(host: &Host) -> std::io::Result<(Vec<ProgInfo>, Holder
     let unknown = progs
         .into_iter()
         .filter(|p| {
+            let by = held.get(&p.id).map(Vec::as_slice).unwrap_or_default();
             if p.name.starts_with("msid_") {
-                let by = held.get(&p.id).map(Vec::as_slice).unwrap_or_default();
                 return by.is_empty() || !by.iter().all(is_minsec_id);
+            }
+            if SYSTEMD_HELD.contains(&p.name.as_str()) {
+                return by.is_empty() || !by.iter().all(is_systemd);
             }
             true
         })

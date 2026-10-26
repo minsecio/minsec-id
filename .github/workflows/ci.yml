@@ -53,3 +53,15 @@ jobs:
       # behaviour is reported, and its memory stays within budget.
       - name: eBPF daemon end to end
         run: sudo MAX_RSS_KB=5120 tests/e2e-daemon.sh target/release/minsec-id
+      # Flatpak and snap: a locally built, signed runtime and a store snap,
+      # tampered with after installation.
+      - name: flatpak end to end
+        run: |
+          sudo apt-get install -y flatpak
+          sudo tests/e2e-flatpak.sh target/release/minsec-id
+      - name: snap end to end
+        run: sudo tests/e2e-snap.sh target/release/minsec-id
+      - name: system extensions end to end
+        run: |
+          sudo apt-get install -y squashfs-tools
+          sudo tests/e2e-sysext.sh target/release/minsec-id

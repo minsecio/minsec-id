@@ -161,9 +161,79 @@ pub fn environ_var(host: &Host, pid: u32, name: &str) -> Option<String> {
         .map(|v| String::from_utf8_lossy(v).into_owned())
 }
 
+/// One line of `/proc/self/mountinfo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mount {
+    /// The path within the filesystem that is mounted (`/` for all of it).
+    pub root: String,
+    pub target: String,
+    pub fstype: String,
+    pub source: String,
+    /// Per-mount and superblock options, comma-joined.
+    pub options: String,
+}
+
+/// The mounts this process sees (the host's, for the scanner).
+pub fn mounts(host: &Host) -> Vec<Mount> {
+    parse_mountinfo(&host.read_opt("/proc/self/mountinfo").unwrap_or_default())
+}
+
+pub fn parse_mountinfo(s: &str) -> Vec<Mount> {
+    s.lines()
+        .filter_map(|l| {
+            let (pre, post) = l.split_once(" - ")?;
+            let pre: Vec<&str> = pre.split(' ').collect();
+            let mut post = post.split(' ');
+            let fstype = post.next()?;
+            let source = post.next().unwrap_or("");
+            let sb = post.next().unwrap_or("");
+            Some(Mount {
+                root: unescape(pre.get(3)?),
+                target: unescape(pre.get(4)?),
+                fstype: fstype.to_string(),
+                source: unescape(source),
+                options: format!("{},{sb}", pre.get(5).unwrap_or(&"")),
+            })
+        })
+        .collect()
+}
+
+/// Undo mountinfo's octal escapes (`\040` for a space).
+fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+            out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
+            i += 4;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_mountinfo() {
+        let m = parse_mountinfo(
+            "29 1 0:26 / / rw,relatime shared:1 - btrfs /dev/vda3 rw,seclabel\n\
+             812 29 7:3 / /snap/core22/1380 ro,nodev,relatime shared:452 - squashfs /dev/loop3 ro,errors=continue\n\
+             90 29 0:40 / /mnt/a\\040b rw - tmpfs tmpfs rw\n",
+        );
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[1].target, "/snap/core22/1380");
+        assert_eq!(m[1].fstype, "squashfs");
+        assert_eq!(m[1].source, "/dev/loop3");
+        assert!(m[1].options.starts_with("ro,"));
+        assert_eq!(m[2].target, "/mnt/a b");
+        assert!(!mounts(&Host::default()).is_empty());
+    }
 
     #[test]
     fn reads_self() {

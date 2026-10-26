@@ -113,12 +113,12 @@ struct Repo {
     insecure: Option<String>,
 }
 
-fn falsy(v: &str) -> bool {
+pub(crate) fn falsy(v: &str) -> bool {
     matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "no" | "false" | "off")
 }
 
 /// INI sections → key/value maps (dnf repo files, flatpak's repo config).
-fn ini(s: &str) -> Vec<(String, BTreeMap<String, String>)> {
+pub(crate) fn ini(s: &str) -> Vec<(String, BTreeMap<String, String>)> {
     let mut out: Vec<(String, BTreeMap<String, String>)> = Vec::new();
     for l in s.lines() {
         let l = l.trim();

@@ -17,19 +17,25 @@ mod accounts;
 mod antiforensics;
 mod boot;
 pub(crate) mod bpf_progs;
+mod checkout;
 mod exe_unowned;
+mod flatpak;
 mod ftrace;
+mod ima;
 mod kernel_tainted;
 pub(crate) mod kmod;
 mod net;
+pub(crate) mod ostree_host;
 pub(crate) mod persistence;
-mod pkg_verify;
+pub(crate) mod pkg_verify;
 pub(crate) mod proc_exe;
 mod proc_hidden;
 mod proc_preload;
-mod repos;
+pub(crate) mod repos;
 pub(crate) mod service_shell;
+mod snap;
 mod ssh_keys;
+mod sysext;
 
 pub use pkg_verify::{verify, VerifyReport};
 
@@ -172,6 +178,14 @@ static ALL: &[&dyn Check] = &[
     &boot::BootKernel,
     &pkg_verify::PkgSignatures,
     &pkg_verify::PkgVerify,
+    &ima::ImaVerify,
+    &flatpak::FlatpakSignatures,
+    &flatpak::FlatpakVerify,
+    &snap::SnapMounts,
+    &snap::SnapVerify,
+    &ostree_host::OstreeDeployment,
+    &ostree_host::OstreeVerify,
+    &sysext::Sysext,
     &exe_unowned::ExeUnowned,
     &repos::RepoKeys,
     &repos::Repos,

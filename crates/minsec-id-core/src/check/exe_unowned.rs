@@ -1,7 +1,8 @@
 //! `exe-unowned`: executables in the system binary directories, shared
 //! libraries at the top of the library directories, and setuid, setgid, or
 //! file-capability binaries there, that no package installed. A stat-only
-//! walk; `/usr/local` and `/opt` are unowned by design and not walked.
+//! walk; `/usr/local` and `/opt` are unowned by design and not walked, and
+//! files from merged system extensions are reported by `sysext`.
 
 use super::{Anchors, Check, Cost, Ctx};
 use crate::finding::{Finding, Severity};
@@ -88,6 +89,10 @@ impl Check for ExeUnowned {
                 walk(host, &d, false, 0, &mut candidates);
             }
         }
+        // Files a merged system extension provides are the `sysext` check's
+        // to report, as one extension, unless they are setuid or carry
+        // capabilities.
+        let layers = crate::sysext::Layers::usr(host, &crate::procfs::mounts(host));
         let mut out = Vec::new();
         for (i, (p, md)) in candidates.into_iter().enumerate() {
             let in_bin = i < bin_count;
@@ -102,6 +107,9 @@ impl Check for ExeUnowned {
                 continue;
             }
             let caps = has_file_caps(&host.path(&p));
+            if !setid && !caps && layers.as_ref().is_some_and(|l| l.is_extension_file(&p, &md)) {
+                continue;
+            }
             let (sev, what) = if setid {
                 (Severity::High, "setuid/setgid executable")
             } else if caps {

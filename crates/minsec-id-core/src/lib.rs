@@ -15,11 +15,13 @@ pub mod finding;
 pub mod host;
 pub mod inspect;
 pub mod monitor;
+pub mod ostree;
 pub mod pkgdb;
 pub mod procfs;
 pub mod scan;
 pub mod sink;
 pub mod state;
+pub mod sysext;
 pub mod users;
 
 pub use config::Config;

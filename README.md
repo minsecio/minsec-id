@@ -22,8 +22,9 @@ for the design and roadmap.
 
 ## Status
 
-Phase 2: the scanner and the optional eBPF daemon are complete. Image-based
-systems (ostree, bootc), flatpak, and snap are next; see
+Phase 3: the scanner, the optional eBPF daemon, and support for flatpak,
+snap, image-based systems (ostree, bootc, composefs), system extensions,
+and IMA are complete. Reporting to minsec.io is next; see
 [docs/PLAN.md](docs/PLAN.md).
 
 ## Checks
@@ -50,6 +51,11 @@ systems (ostree, bootc), flatpak, and snap are next; see
 | `accounts` | extra uid-0 accounts, empty passwords, new login accounts, new `NOPASSWD` rules | quick |
 | `ssh-key-new` | SSH keys authorized for any account | quick |
 | `anti-forensics` | history files linked to `/dev/null`, login and auth logs truncated in place | quick |
+| `ima-verify` | files the kernel's IMA measurements record with content other than their package's (where a measurement policy is active) | quick |
+| `flatpak-verify`, `flatpak-signatures` | deployed flatpak apps and runtimes against their ostree commits; deployed commits without a valid signature | full, quick |
+| `snap-verify`, `snap-mounts` | snaps against the store's signed digests; `/snap` mounts not backed by their own file | full, quick |
+| `ostree-verify`, `ostree-deployment` | on ostree systems: the booted `/usr` against its commit; image changes, staged switches, unlocked `/usr`, the composefs image, layered packages | full, quick |
+| `sysext` | system and configuration extensions merged over `/usr`, `/opt`, `/etc` | quick |
 
 Checks that compare with a baseline record it on their first run and report
 changes after that. When a reported change is one you want to keep, reset
@@ -60,6 +66,36 @@ its ctime is newer than its package's install time, when its size or mtime
 differ from the package database, or when it falls in the day's slice of a
 rolling sample that covers every packaged file once a week. On a
 3,400-package Fedora workstation, a full scan takes about ten seconds.
+
+## Image-based systems and app formats
+
+Each format is verified from what its own tooling keeps, the same way the
+package database is used:
+
+* **flatpak** deployments are hard-linked checkouts of content-addressed
+  ostree objects, so a stat walk finds files missing, replaced, or added,
+  and an object is hashed only when its ctime moved since the previous
+  scan's newest deployment, or in the weekly rolling sample. Deployed
+  commits from signed remotes are checked with `gpgv` against the remote's
+  keyring.
+* **snap** files are compared with the store's `snap-revision` assertions
+  (size every scan, SHA3-384 on change), and every `/snap` mount must be
+  backed by its own file.
+* **ostree systems** (Fedora CoreOS, Silverblue, bootc) are verified against
+  the booted commit, which replaces `pkg-verify` and also owns the files
+  composed into the image. `ostree-deployment` reports a switch to another
+  image (booted, or staged for the next boot), unverified image transports,
+  `/usr` unlocked, a rewritten composefs image, and layered packages.
+* **System extensions** (`systemd-sysext`, `systemd-confext`) are reported
+  when they appear and whenever their content changes; their files are
+  then not reported one by one.
+* **IMA**, where a measurement policy is active, gives a digest of every
+  program run, compared with the package's.
+
+Per-user flatpak installations are writable by their user and are not
+checked. Commits from OCI remotes (Fedora's flatpaks) and snap assertions'
+signatures are not verified: flatpak and snapd verified them when they
+were fetched.
 
 ## The eBPF daemon
 
