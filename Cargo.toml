@@ -19,6 +19,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
+sha3 = "0.10"
 md-5 = "0.10"
 base64 = "0.22"
 aya = { version = "0.14", default-features = false }

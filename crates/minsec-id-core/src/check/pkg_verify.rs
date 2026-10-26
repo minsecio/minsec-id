@@ -33,16 +33,18 @@ use std::path::Path;
 pub struct PkgVerify;
 pub struct PkgSignatures;
 
+const VERIFIED: &str = "verified.bin";
 const SETID: u32 = libc::S_ISUID | libc::S_ISGID;
 
-fn path_hash(p: &str) -> u64 {
+pub(crate) fn path_hash(p: &str) -> u64 {
     u64::from_str_radix(&fingerprint(&[p]), 16).unwrap_or(0)
 }
 
-/// `verified.bin`: sorted (path hash, ctime ns) pairs, little-endian.
-fn load_verified(dir: &Path) -> HashMap<u64, i64> {
+/// `verified.bin` (and the other formats' memos): sorted (key, ctime ns)
+/// pairs, little-endian.
+pub(crate) fn load_verified(dir: &Path, name: &str) -> HashMap<u64, i64> {
     let mut m = HashMap::new();
-    let Ok(mut f) = std::fs::File::open(dir.join("verified.bin")) else {
+    let Ok(mut f) = std::fs::File::open(dir.join(name)) else {
         return m;
     };
     let mut buf = Vec::new();
@@ -58,7 +60,7 @@ fn load_verified(dir: &Path) -> HashMap<u64, i64> {
     m
 }
 
-fn save_verified(dir: &Path, m: &HashMap<u64, i64>) -> std::io::Result<()> {
+pub(crate) fn save_verified(dir: &Path, name: &str, m: &HashMap<u64, i64>) -> std::io::Result<()> {
     let mut v: Vec<(&u64, &i64)> = m.iter().collect();
     v.sort();
     let mut buf = Vec::with_capacity(v.len() * 16);
@@ -66,9 +68,9 @@ fn save_verified(dir: &Path, m: &HashMap<u64, i64>) -> std::io::Result<()> {
         buf.extend_from_slice(&k.to_le_bytes());
         buf.extend_from_slice(&c.to_le_bytes());
     }
-    let tmp = dir.join("verified.bin.tmp");
+    let tmp = dir.join(format!("{name}.tmp"));
     std::fs::File::create(&tmp)?.write_all(&buf)?;
-    std::fs::rename(tmp, dir.join("verified.bin"))
+    std::fs::rename(tmp, dir.join(name))
 }
 
 struct Run<'a> {
@@ -295,7 +297,7 @@ impl Check for PkgVerify {
             now: ctx.now,
             slack: ctx.cfg.scan.ctime_slack.secs(),
             sample_days: ctx.cfg.scan.sample_days.max(1) as u64,
-            verified: load_verified(&ctx.state_dir),
+            verified: load_verified(&ctx.state_dir, VERIFIED),
             next_verified: HashMap::new(),
             dirty: claimed.paths.iter().map(|p| path_hash(p)).collect(),
             out: Vec::new(),
@@ -316,7 +318,7 @@ impl Check for PkgVerify {
         if !group.is_empty() {
             run.path(&group);
         }
-        if let Err(e) = save_verified(&ctx.state_dir, &run.next_verified) {
+        if let Err(e) = save_verified(&ctx.state_dir, VERIFIED, &run.next_verified) {
             tracing::warn!("verified.bin: {e}");
         }
         tracing::info!(
@@ -455,8 +457,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("minsec-id-verified-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let m = HashMap::from([(1u64, -5i64), (u64::MAX, 7)]);
-        save_verified(&dir, &m).unwrap();
-        assert_eq!(load_verified(&dir), m);
+        save_verified(&dir, VERIFIED, &m).unwrap();
+        assert_eq!(load_verified(&dir, VERIFIED), m);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

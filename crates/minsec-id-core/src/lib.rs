@@ -15,6 +15,7 @@ pub mod finding;
 pub mod host;
 pub mod inspect;
 pub mod monitor;
+pub mod ostree;
 pub mod pkgdb;
 pub mod procfs;
 pub mod scan;

@@ -4,6 +4,7 @@
 
 use md5::Md5;
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha3::Sha3_384;
 use std::io::Read;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
@@ -14,6 +15,8 @@ pub enum Algo {
     Sha256,
     Sha384,
     Sha512,
+    /// snapd's digest of a `.snap`.
+    Sha3_384,
 }
 
 impl Algo {
@@ -34,6 +37,7 @@ impl Algo {
             Algo::Sha256 => 32,
             Algo::Sha384 => 48,
             Algo::Sha512 => 64,
+            Algo::Sha3_384 => 48,
         }
     }
 
@@ -43,6 +47,7 @@ impl Algo {
             Algo::Sha256 => "sha256",
             Algo::Sha384 => "sha384",
             Algo::Sha512 => "sha512",
+            Algo::Sha3_384 => "sha3-384",
         }
     }
 }
@@ -52,6 +57,7 @@ enum Hasher {
     Sha256(Sha256),
     Sha384(Sha384),
     Sha512(Sha512),
+    Sha3_384(Sha3_384),
 }
 
 impl Hasher {
@@ -61,6 +67,7 @@ impl Hasher {
             Algo::Sha256 => Hasher::Sha256(Sha256::new()),
             Algo::Sha384 => Hasher::Sha384(Sha384::new()),
             Algo::Sha512 => Hasher::Sha512(Sha512::new()),
+            Algo::Sha3_384 => Hasher::Sha3_384(Sha3_384::new()),
         }
     }
     fn update(&mut self, b: &[u8]) {
@@ -69,6 +76,7 @@ impl Hasher {
             Hasher::Sha256(h) => h.update(b),
             Hasher::Sha384(h) => h.update(b),
             Hasher::Sha512(h) => h.update(b),
+            Hasher::Sha3_384(h) => h.update(b),
         }
     }
     fn finish(self) -> Vec<u8> {
@@ -77,6 +85,7 @@ impl Hasher {
             Hasher::Sha256(h) => h.finalize().to_vec(),
             Hasher::Sha384(h) => h.finalize().to_vec(),
             Hasher::Sha512(h) => h.finalize().to_vec(),
+            Hasher::Sha3_384(h) => h.finalize().to_vec(),
         }
     }
 }
@@ -89,6 +98,12 @@ pub fn bytes(a: Algo, data: &[u8]) -> Vec<u8> {
 
 /// Digest a file without following a final symlink.
 pub fn file(a: Algo, path: &Path) -> std::io::Result<Vec<u8>> {
+    file_with_prefix(a, &[], path)
+}
+
+/// Digest `prefix` followed by a file's content (ostree hashes a header of
+/// ownership and mode before the content).
+pub fn file_with_prefix(a: Algo, prefix: &[u8], path: &Path) -> std::io::Result<Vec<u8>> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut f = std::fs::OpenOptions::new()
         .read(true)
@@ -100,6 +115,7 @@ pub fn file(a: Algo, path: &Path) -> std::io::Result<Vec<u8>> {
         libc::posix_fadvise(fd, 0, 0, libc::POSIX_FADV_SEQUENTIAL);
     }
     let mut h = Hasher::new(a);
+    h.update(prefix);
     let mut buf = vec![0u8; 128 * 1024];
     loop {
         let n = match f.read(&mut buf) {
@@ -144,6 +160,10 @@ mod tests {
         assert_eq!(
             hex(&bytes(Algo::Sha256, b"abc")),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            hex(&bytes(Algo::Sha3_384, b"abc")),
+            "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25"
         );
         assert_eq!(unhex("00ff10").unwrap(), vec![0, 255, 16]);
         assert!(unhex("0").is_none() && unhex("zz").is_none());

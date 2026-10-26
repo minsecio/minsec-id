@@ -16,5 +16,6 @@ toml.workspace = true
 libc.workspace = true
 tracing.workspace = true
 sha2.workspace = true
+sha3.workspace = true
 md-5.workspace = true
 base64.workspace = true

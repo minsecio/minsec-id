@@ -66,6 +66,7 @@ impl Check for KernelTainted {
             .map_err(|_| anyhow::anyhow!("{TAINTED}: unexpected contents `{raw}`"))?;
         let boot = host.boot_id().unwrap_or_default();
         let modules = module_taints(host);
+        let packaged = packaged_modules(ctx, &modules);
         Ok(decode(mask)
             .into_iter()
             .map(|(bit, flag)| {
@@ -82,10 +83,21 @@ impl Check for KernelTainted {
                     .filter(|(_, t)| t.contains(letter.as_str()))
                     .map(|(m, _)| m.as_str())
                     .collect();
+                // Out-of-tree and proprietary modules a package installed, and
+                // signed (Ubuntu's zfs, a packaged NVIDIA driver), are the
+                // distribution's choice: still reported, but as information.
+                let from_packages = matches!(letter.as_str(), "P" | "O")
+                    && !culprits.is_empty()
+                    && culprits.iter().all(|m| packaged.contains(*m));
+                let severity = if from_packages { Severity::Info } else { severity };
                 let message = if culprits.is_empty() {
                     format!("kernel tainted ({letter}): {meaning}")
                 } else {
-                    format!("kernel tainted ({letter}): {meaning}: {}", culprits.join(", "))
+                    format!(
+                        "kernel tainted ({letter}): {meaning}: {}{}",
+                        culprits.join(", "),
+                        if from_packages { " (signed, from packages)" } else { "" }
+                    )
                 };
                 Finding::new(self.id(), severity, &letter, &format!("{boot}\0{}", culprits.join(",")))
                     .message(message)
@@ -105,6 +117,21 @@ fn decode(mask: u64) -> Vec<(u32, Option<Flag>)> {
             let flag = FLAGS.iter().find(|f| f.0 == bit).map(|f| (f.1, f.2, f.3));
             (bit, flag)
         })
+        .collect()
+}
+
+/// The tainting modules that are signed (not `E`) and whose file a package
+/// installed.
+fn packaged_modules(ctx: &Ctx, modules: &[(String, String)]) -> std::collections::HashSet<String> {
+    let Ok(db) = ctx.owned() else {
+        return Default::default();
+    };
+    let (_, dep) = super::kmod::modules_dep(ctx.host).unwrap_or_default();
+    let mut canon = crate::host::Canon::new(ctx.host);
+    modules
+        .iter()
+        .filter(|(m, t)| !t.contains('E') && dep.get(m).is_some_and(|p| db.owns(&canon.path(p))))
+        .map(|(m, _)| m.clone())
         .collect()
 }
 
