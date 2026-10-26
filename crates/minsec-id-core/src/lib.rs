@@ -6,12 +6,15 @@
 
 pub mod check;
 pub mod config;
+pub mod control;
 pub mod digest;
+pub mod dirty;
 pub mod duration;
 pub mod events;
 pub mod finding;
 pub mod host;
 pub mod inspect;
+pub mod monitor;
 pub mod pkgdb;
 pub mod procfs;
 pub mod scan;

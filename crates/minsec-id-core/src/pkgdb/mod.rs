@@ -359,7 +359,7 @@ impl<'h> Builder<'h> {
         let digest_off = self.db.digests.len() as u32;
         let hex = f.digest_hex.as_bytes();
         let mut digest_len = 0u8;
-        if !hex.is_empty() && hex.len() % 2 == 0 && hex.len() <= 510 {
+        if !hex.is_empty() && hex.len().is_multiple_of(2) && hex.len() <= 510 {
             let ok = hex.chunks_exact(2).all(|c| {
                 match std::str::from_utf8(c).ok().and_then(|x| u8::from_str_radix(x, 16).ok()) {
                     Some(b) => {

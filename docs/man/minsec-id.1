@@ -22,7 +22,11 @@ interfaces.
 .PP
 Scans are run by systemd timers: a quick scan every 30 minutes and a full scan
 daily.
-Nothing stays resident between scans.
+Nothing stays resident between scans, unless the optional eBPF monitor
+.RB ( "minsec-id daemon" ,
+.BR minsec-id.service )
+is enabled; see
+.BR DAEMON .
 A file is hashed only when there is evidence it changed (its ctime is newer
 than its package's install time, or its size or mtime differ), or when
 it falls in the day's slice of a rolling sample that covers every packaged
@@ -73,6 +77,9 @@ disabled), and to the notify hook.
 .B \-q
 prints nothing.
 .SS status
+The last scan, the open findings by severity, the daemon's recent findings,
+and, when it is running, its uptime, attached probes, the kernel records it
+examined (execs and writes, not findings), records lost, and memory.
 Show the last scan and counts of open findings by severity.
 .SS "findings [--all] [--severity level]"
 List open findings, most severe first.
@@ -102,11 +109,22 @@ List the baselines recorded by checks, or, with
 forget them so the next scan records the current state.
 Reset after reviewing a reported change you want to keep.
 .SS checks
-List checks: an asterisk marks enabled ones; each shows its cost and whether
-it can run on this host.
-.SS "enable check" ", " "disable check"
-Write
-.IR conf.d/ check .toml .
+List checks and daemon rules: an asterisk marks enabled ones; each shows its
+cost
+.RB ( quick ,
+.BR full ,
+or
+.B daemon
+for a rule) and whether it can run on this host.
+.SS "enable id" ", " "disable id"
+Enable or disable a check or daemon rule: writes
+.IR conf.d/ id .toml .
+A rule enabled while the daemon runs takes effect when it restarts.
+.SS daemon
+Run the eBPF monitor in the foreground until SIGTERM or SIGINT.
+SIGHUP (or
+.BR "systemctl reload minsec-id" )
+re-reads the configuration.
 .SS inspect
 Report kernel features (BTF, BPF LSM, IMA, lockdown, Secure Boot), the active
 LSMs, the package managers present, whether the host boots from ostree, the
@@ -202,6 +220,90 @@ SSH keys authorized for any account, by fingerprint, and
 History files linked to
 .IR /dev/null ;
 login and authentication logs truncated in place.
+.TP
+.B proc-hidden
+Processes the kernel runs that the
+.I /proc
+listing omits, from a BPF task iterator.
+.SH DAEMON
+The daemon loads BPF programs that filter in the kernel and send records
+through one ring buffer; its rules judge them in userspace.
+Each rule has an id, enabled and configured like a check:
+.TP
+.BR exec " (emits " exec-memfd ", " exec-deleted ", " exec-writable ", " exec-unowned ", " exec-service-shell )
+A program run from an anonymous memory file, from a file already deleted,
+from a writable or hidden location or tmpfs, or from a file in a system path
+that no package installed; a shell or interpreter started by a service
+account with a network socket on standard input or output.
+.TP
+.B write-sensitive
+A file opened for writing, outside a package transaction, that matters by
+itself: SSH
+.IR authorized_keys ,
+.IR /etc/ld.so.preload ,
+PAM modules and configuration, sudoers, sshd and loader configuration,
+.IR /boot ,
+the account files, persistence locations, and system programs and libraries
+modified in place or added to
+.IR /usr/bin .
+Other writes under
+.IR /usr ,
+.IR /boot ,
+and
+.I /etc
+are recorded in
+.I dirty.list
+and hashed by the next full scan.
+.TP
+.B module-load
+A kernel module loaded from outside
+.IR modules.dep ,
+not installed by a package, or unsigned.
+.TP
+.B kexec-load
+A kernel loaded for
+.BR kexec (8)
+(low severity for a crash kernel).
+.TP
+.B bpf-load
+A tracing, kprobe, or LSM BPF program loaded (systemd's and minsec-id's own
+are not reported).
+.TP
+.B priv-escalation
+A process with no uid 0 among its real, effective, and saved uids becoming
+root other than by executing a setuid program.
+.TP
+.B ptrace-attach
+A process attaching to another user's process, or writing its memory.
+.TP
+.B devmem-open
+.IR /dev/mem ,
+.IR /dev/port ,
+or
+.I /proc/kcore
+opened.
+.PP
+Writes by the package managers (rpm, dnf, apt, dpkg, PackageKit,
+rpm-ostree, \&...) and their scriptlets are not reported.
+Daemon findings are logged, journaled, and passed to the hook as they
+happen, and the same finding is not reported again within
+.B daemon.repeat
+(an hour).
+.B findings
+lists those reported within
+.B daemon.recent
+(a week) after the scan's open findings, marked
+.BR [daemon:\ ...] ,
+with how many times and how recently; nothing resolves them, since they
+record something that happened.
+Accept the expected ones.
+.PP
+The daemon needs a kernel with BTF and the capabilities
+.B CAP_BPF
+and
+.BR CAP_PERFMON ;
+.B lockdown=confidentiality
+prevents it from running.
 .SH JOURNAL
 Findings are sent to journald with
 .B SYSLOG_IDENTIFIER=minsec-id
@@ -218,7 +320,7 @@ Severity maps to the syslog priority.
 .SH PRIVILEGES
 Scans should run as root: reading other users' processes needs
 .BR CAP_SYS_PTRACE ,
-listing BPF programs needs
+listing BPF programs and running the task iterator needs
 .BR CAP_SYS_ADMIN ,
 and many checked files are readable only by root.
 An unprivileged scan runs what it can and reports the rest as unavailable.
@@ -228,7 +330,9 @@ An unprivileged scan runs what it can and reports the rest as unavailable.
 Log filter for diagnostics on standard error, in
 .B tracing
 syntax; the default is
-.BR warn .
+.B warn
+.RB ( info
+for the daemon).
 .SH FILES
 .TP
 .I /etc/minsec-id/minsec-id.toml
@@ -248,6 +352,13 @@ The findings log, rotated at 8 MiB to
 .I /var/lib/minsec-id/verified.bin
 Files whose ctime moved after install but that hashed clean, so they are not
 re-hashed until it moves again.
+.TP
+.I /var/lib/minsec-id/dirty.list
+System files the daemon saw written outside package transactions; the next
+full scan hashes them.
+.TP
+.I /run/minsec-id/minsec-id.sock
+The daemon's control socket (root only).
 .SH EXIT STATUS
 .B scan
 and
@@ -263,6 +374,8 @@ sudo minsec-id findings \-\-severity high
 sudo minsec-id accept kernel-tainted:P \-\-reason "NVIDIA driver"
 sudo minsec-id verify /usr/bin/sudo
 sudo minsec-id baseline \-\-reset \-\-check ssh-key-new
+sudo systemctl enable \-\-now minsec-id
+sudo minsec-id accept exec-writable:/tmp/build/* \-\-reason "CI builds"
 journalctl SYSLOG_IDENTIFIER=minsec-id \-p warning
 .fi
 .SH SEE ALSO

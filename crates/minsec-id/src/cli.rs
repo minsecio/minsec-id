@@ -84,16 +84,18 @@ pub(crate) enum Cmd {
         #[arg(long = "check", value_name = "ID")]
         checks: Vec<String>,
     },
-    /// List checks, with cost and availability on this host.
+    /// List checks and daemon rules, with cost and availability on this host.
     Checks,
-    /// Enable a check (writes conf.d/<check>.toml).
+    /// Enable a check or daemon rule (writes conf.d/<id>.toml).
     Enable { check: String },
-    /// Disable a check.
+    /// Disable a check or daemon rule.
     Disable { check: String },
     /// Report host capabilities, configuration sources, and checks.
     Inspect,
     /// Validate configuration.
     Check,
+    /// Run the eBPF monitor in the foreground (as minsec-id.service does).
+    Daemon,
     /// Print the findings log.
     Events {
         #[arg(short = 'n', long, default_value_t = 50)]

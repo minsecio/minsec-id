@@ -1,5 +1,15 @@
 name: ci
-on: [push, pull_request]
+# Pull requests are tested as PRs (merged with main); pushes only on main,
+# where there is no PR. A branch with an open PR is not tested twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+# A newer push to the same PR or branch supersedes a run still going.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
   MAX_BINARY_BYTES: 5000000
@@ -12,13 +22,15 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+      # The BPF programs are C, compiled by build.rs.
+      - run: sudo apt-get install -y clang
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
       - name: Shell scripts and completions
         run: |
           sudo apt-get install -y bash-completion zsh fish shellcheck
-          shellcheck scripts/*.sh packaging/deb/* tests/*.sh completions/bash/*
+          shellcheck scripts/*.sh packaging/deb/* tests/*.sh tests/vm/*.sh completions/bash/*
           tests/completions.sh "$PWD/target/debug/minsec-id"
       - run: cargo build --release
       - name: binary size gate
@@ -37,3 +49,7 @@ jobs:
           rc=0; sudo target/release/minsec-id -c "$RUNNER_TEMP" scan --full || rc=$?
           test "$rc" -eq 0 -o "$rc" -eq 2
           sudo target/release/minsec-id -c "$RUNNER_TEMP" findings
+      # The daemon on the runner's kernel: every probe attaches, each watched
+      # behaviour is reported, and its memory stays within budget.
+      - name: eBPF daemon end to end
+        run: sudo MAX_RSS_KB=5120 tests/e2e-daemon.sh target/release/minsec-id

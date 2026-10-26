@@ -1,7 +1,9 @@
 //! `ftrace-hooks`: kernel functions with ftrace callbacks attached, from
 //! tracefs's `enabled_functions`. Rootkits hook syscalls and `filldir` this
 //! way; so do BPF trampolines, kprobes, live patches, and an admin running a
-//! tracer, which are reported at lower severity and grouped by owner.
+//! tracer, which are reported at lower severity and grouped by owner. BPF
+//! trampolines are not reported at all when every loaded tracing program is
+//! known (systemd's, minsec-id's own).
 
 use super::{Anchors, Check, Cost, Ctx, Unavailable};
 use crate::finding::{fingerprint, Finding, Severity};
@@ -86,8 +88,13 @@ impl Check for Ftrace {
         else {
             return Err(Unavailable("tracefs is not mounted or not readable".into()).into());
         };
+        // BPF trampolines are explained when every loaded tracing program
+        // is (bpf-prog-unknown reports the ones that are not).
+        let bpf_explained = ctx.host.root() == std::path::Path::new("/")
+            && super::bpf_progs::unexplained(ctx.host).is_ok_and(|(u, _)| u.is_empty());
         Ok(parse(&text)
             .into_iter()
+            .filter(|(o, _)| !(o == "bpf" && bpf_explained))
             .map(|(o, (sev, mut funcs))| {
                 funcs.sort();
                 let salient = fingerprint(&funcs.iter().map(String::as_str).collect::<Vec<_>>());

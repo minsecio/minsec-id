@@ -12,7 +12,12 @@ min_severity = "low"
 # MINSEC_FINGERPRINT, MINSEC_MESSAGE are set.
 # exec = "/usr/local/bin/minsec-id-notify"
 
-# Per-check overrides; `minsec-id checks` lists them.
+# The optional eBPF monitor (minsec-id.service).
+# [daemon]
+# Report the same finding again only after this long.
+# repeat = "1h"
+
+# Per-check and per-rule overrides; `minsec-id checks` lists them.
 # [checks.kernel-tainted]
 # enabled = true
 # severity = "high"

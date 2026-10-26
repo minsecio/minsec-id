@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 minsec-id-core = { path = "../minsec-id-core" }
+minsec-id-bpf = { path = "../minsec-id-bpf" }
+tokio.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
@@ -32,7 +34,8 @@ extended-description = """\
 minsec-id checks a Linux host for signs of intrusion using what the system \
 already knows: the package manager's file digests, kernel taint and security \
 state, and (optionally) eBPF. No file-hash database and nothing resident by \
-default; scans run from a systemd timer."""
+default; scans run from a systemd timer. The eBPF monitor \
+(minsec-id.service) is installed but not enabled."""
 section = "admin"
 priority = "optional"
 depends = "libc6 (>= 2.34), systemd"
@@ -40,6 +43,7 @@ suggests = "bash-completion"
 assets = [
   ["target/release/minsec-id", "usr/bin/", "755"],
   ["../../packaging/minsec-id.toml", "etc/minsec-id/minsec-id.toml", "644"],
+  ["../../packaging/minsec-id.service", "lib/systemd/system/minsec-id.service", "644"],
   ["../../packaging/minsec-id-scan.service", "lib/systemd/system/minsec-id-scan.service", "644"],
   ["../../packaging/minsec-id-scan.timer", "lib/systemd/system/minsec-id-scan.timer", "644"],
   ["../../packaging/minsec-id-scan-full.service", "lib/systemd/system/minsec-id-scan-full.service", "644"],
@@ -67,6 +71,7 @@ post_uninstall_script = "../../packaging/rpm/postun.sh"
 assets = [
   { source = "target/release/minsec-id", dest = "/usr/bin/minsec-id", mode = "755" },
   { source = "packaging/minsec-id.toml", dest = "/etc/minsec-id/minsec-id.toml", mode = "644", config = "noreplace" },
+  { source = "packaging/minsec-id.service", dest = "/usr/lib/systemd/system/minsec-id.service", mode = "644" },
   { source = "packaging/minsec-id-scan.service", dest = "/usr/lib/systemd/system/minsec-id-scan.service", mode = "644" },
   { source = "packaging/minsec-id-scan.timer", dest = "/usr/lib/systemd/system/minsec-id-scan.timer", mode = "644" },
   { source = "packaging/minsec-id-scan-full.service", dest = "/usr/lib/systemd/system/minsec-id-scan-full.service", mode = "644" },

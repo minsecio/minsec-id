@@ -22,8 +22,9 @@ for the design and roadmap.
 
 ## Status
 
-Phase 1: the scanner is complete. The optional eBPF daemon (real-time
-detection) is next; see [docs/PLAN.md](docs/PLAN.md).
+Phase 2: the scanner and the optional eBPF daemon are complete. Image-based
+systems (ostree, bootc), flatpak, and snap are next; see
+[docs/PLAN.md](docs/PLAN.md).
 
 ## Checks
 
@@ -40,6 +41,7 @@ detection) is next; see [docs/PLAN.md](docs/PLAN.md).
 | `exe-unowned` | executables, libraries, setuid and capability binaries in system paths that no package owns | quick |
 | `repo-key-changed`, `repo-changed` | signing keys and repositories added or changed; repositories that skip signature checks | quick |
 | `proc-exe` | processes running from deleted files, memfds, or writable or hidden locations | quick |
+| `proc-hidden` | processes the kernel runs that `/proc` does not list (read with a BPF task iterator) | quick |
 | `proc-preload` | `ld.so.preload`, `LD_PRELOAD`, code mapped from writable or deleted files | quick |
 | `proc-service-shell` | shells run by service accounts with a network socket on stdio | quick |
 | `net-listener` | listeners hidden from `/proc/net`, or served by unowned binaries | quick |
@@ -59,6 +61,46 @@ differ from the package database, or when it falls in the day's slice of a
 rolling sample that covers every packaged file once a week. On a
 3,400-package Fedora workstation, a full scan takes about ten seconds.
 
+## The eBPF daemon
+
+`minsec-id daemon` (`minsec-id.service`, installed but not enabled) watches
+as things happen, where a scan sees only what is left afterwards. Its BPF
+programs filter in the kernel and send compact records through one ring
+buffer; the rules that judge them run in userspace, with the package
+database and `/proc` to hand.
+
+| Rule | Reports |
+|---|---|
+| `exec` | programs run from memfds (`exec-memfd`), deleted files (`exec-deleted`), writable or hidden locations and tmpfs (`exec-writable`), unowned files in system paths (`exec-unowned`); shells started by service accounts with a network socket on stdio (`exec-service-shell`) |
+| `write-sensitive` | writes, outside package transactions, to `authorized_keys`, `ld.so.preload`, PAM, sudoers, sshd and loader configuration, `/boot`, the account files, persistence locations, and system programs modified in place |
+| `module-load` | modules loaded from outside `modules.dep`, not from a package, or unsigned |
+| `kexec-load` | a kernel loaded to boot into without the bootloader |
+| `bpf-load` | tracing, kprobe, and LSM BPF programs loaded |
+| `priv-escalation` | a process becoming root without running a setuid program (the outcome of most kernel exploits) |
+| `ptrace-attach` | attaching to, or writing the memory of, another user's process |
+| `devmem-open` | `/dev/mem`, `/dev/port`, or `/proc/kcore` opened |
+
+Other writes under `/usr`, `/boot`, and `/etc` go to
+`/var/lib/minsec-id/dirty.list`, and the next full scan hashes those files
+whatever their ctime says. Daemon findings go to the findings log, the
+journal, and the hook as they happen; the same finding is not reported again
+within an hour (`daemon.repeat`). `minsec-id findings` lists them after the
+scan's open findings, marked `[daemon: …]`, for a week (`daemon.recent`):
+they record something that happened, so no later scan resolves them. Accept
+the ones that are expected. `minsec-id status` shows the daemon's probes and
+how many kernel records it examined (execs and writes; not findings). It uses about 2 MB of anonymous
+memory and about 1 MB of BPF maps (half of it the ring buffer).
+
+```sh
+sudo systemctl enable --now minsec-id
+sudo minsec-id status
+sudo minsec-id events
+```
+
+The daemon needs a kernel with BTF (`/sys/kernel/btf/vmlinux`) and
+CAP_BPF and CAP_PERFMON. It cannot run under `lockdown=confidentiality`,
+which forbids BPF programs from reading kernel memory.
+
 ## What it does not claim
 
 A kernel rootkit loaded before `minsec-id` can blind it. `minsec-id` can see
@@ -73,11 +115,13 @@ Linux 5.14 or newer with glibc 2.34 or newer: EL9/10, Debian 12+, Ubuntu
 
 ## Quick start
 
+Building needs Rust 1.87 or newer and clang (for the BPF programs).
+
 ```sh
 cargo build --release
 sudo install -m 0755 target/release/minsec-id /usr/bin/minsec-id
 sudo install -d /etc/minsec-id && sudo install -m 0644 packaging/minsec-id.toml /etc/minsec-id/
-sudo install -m 0644 packaging/minsec-id-scan*.{service,timer} /etc/systemd/system/
+sudo install -m 0644 packaging/minsec-id*.{service,timer} /etc/systemd/system/
 sudo install -m 0644 packaging/minsec-id.tmpfiles.conf /usr/lib/tmpfiles.d/minsec-id.conf
 sudo install -m 0644 docs/man/minsec-id.1 /usr/share/man/man1/
 sudo install -m 0644 docs/man/minsec-id.toml.5 /usr/share/man/man5/
@@ -89,7 +133,8 @@ sudo systemctl enable --now minsec-id-scan.timer minsec-id-scan-full.timer
 
 ## Findings
 
-Every check has a stable id (`minsec-id checks`). A finding is reported once —
+Every check and daemon rule has a stable id (`minsec-id checks`). A scan
+finding is reported once —
 to `/var/lib/minsec-id/findings.jsonl`, to journald, and to an optional
 `exec` hook — and stays open until a later scan no longer sees it, which logs
 it as resolved.
@@ -115,9 +160,10 @@ you can review and distribute, not hidden state.
 | `minsec-id accept <finding> [--reason]` / `unaccept <key>` | accept rules |
 | `minsec-id verify <path\|package>` | hash files now and compare with the package database |
 | `minsec-id baseline [--reset] [--check ID…]` | show or reset baselines |
-| `minsec-id checks` / `enable` / `disable <check>` | the check catalog |
+| `minsec-id checks` / `enable` / `disable <id>` | checks and daemon rules |
 | `minsec-id inspect` | host capabilities and configuration sources |
 | `minsec-id check` | validate configuration |
+| `minsec-id daemon` | the eBPF monitor, in the foreground |
 | `minsec-id events` | the findings log |
 
 Complete references: `minsec-id(1)` and `minsec-id.toml(5)`.

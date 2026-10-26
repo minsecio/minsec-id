@@ -51,7 +51,9 @@ once per new finding, with the finding as JSON on standard input and
 and
 .B MINSEC_MESSAGE
 in the environment.
-It is killed after 30 seconds and runs inside the scan service's sandbox.
+It is killed after 30 seconds and runs inside the scan (or daemon) service's
+sandbox; the daemon runs at most four at once and skips the hook beyond
+that.
 .TP
 .BR min_severity " (default " low )
 Notify (journal and
@@ -73,23 +75,36 @@ in addition to files with evidence of change.
 .BR ctime_slack " (duration, default " 1h )
 A packaged file whose ctime is this much newer than its package's install
 time has changed since install and is hashed.
+.SH DAEMON TABLE
+.TP
+.BR repeat " (duration, default " 1h )
+The daemon reports the same finding (the same fingerprint) again only after
+this long.
+.TP
+.BR recent " (duration, default " 1w )
+.B minsec-id findings
+lists daemon findings reported within this long.
 .SH PATHS TABLE
 .TP
 .BR state_dir " (default " /var/lib/minsec-id )
-Where state, the findings log, and the verified-file cache live.
+Where state, the findings log, the verified-file cache, and the daemon's
+dirty list live.
 .TP
 .BR socket " (default " /run/minsec-id/minsec-id.sock )
-Reserved for the optional daemon.
+The daemon's control socket.
 .SH CHECKS TABLES
 .TP
 .B [checks.\fIid\fB]
+A check or a daemon rule
+.RB ( "minsec-id checks"
+lists both).
 .RS
 .TP
 .BR enabled " (boolean)"
-Override the check's default.
+Override the default.
 .TP
 .BR severity
-Replace the severity of every finding the check emits.
+Replace the severity of every finding the check or rule emits.
 .RE
 .SH ACCEPT TABLES
 .TP
@@ -113,6 +128,12 @@ sample_days = 14
 
 [checks.ftrace-hooks]
 enabled = false
+
+[daemon]
+repeat = "6h"
+
+[checks.ptrace-attach]
+severity = "low"
 
 [accept."kernel-tainted:P"]
 reason = "NVIDIA driver"

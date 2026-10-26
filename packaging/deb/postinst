@@ -4,10 +4,14 @@ if [ "$1" = "configure" ]; then
     systemd-tmpfiles --create minsec-id.conf >/dev/null 2>&1 || true
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload >/dev/null 2>&1 || true
-        if [ -z "$2" ]; then
+        if [ -n "$2" ]; then
+            # Upgrade: a running monitor restarts on the new binary.
+            systemctl try-restart minsec-id.service >/dev/null 2>&1 || true
+        else
             # Fresh install: scanning is read-only, so start the timers now.
             systemctl enable --now minsec-id-scan.timer minsec-id-scan-full.timer >/dev/null 2>&1 || true
             echo "minsec-id installed. First results after the next scan, or now: minsec-id scan"
+            echo "Real-time monitoring is optional: systemctl enable --now minsec-id"
         fi
     fi
 fi

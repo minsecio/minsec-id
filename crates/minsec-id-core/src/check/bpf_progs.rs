@@ -17,7 +17,7 @@ const BPF_PROG_GET_FD_BY_ID: libc::c_long = 13;
 const BPF_OBJ_GET_INFO_BY_FD: libc::c_long = 15;
 
 /// Program types that observe or alter kernel behaviour.
-const TRACING_TYPES: &[(u32, &str)] = &[
+pub(crate) const TRACING_TYPES: &[(u32, &str)] = &[
     (2, "kprobe"),
     (5, "tracepoint"),
     (7, "perf_event"),
@@ -30,10 +30,10 @@ const TRACING_TYPES: &[(u32, &str)] = &[
 
 /// Programs the kernel or systemd load themselves (names are truncated to
 /// 15 characters by the kernel). `msid_` is reserved for minsec-id's own.
-const KNOWN: &[&str] = &["restrict_filesy", "dump_bpf_map", "dump_bpf_prog", "hid_tail_call"];
+pub(crate) const KNOWN: &[&str] = &["restrict_filesy", "dump_bpf_map", "dump_bpf_prog", "hid_tail_call"];
 
 #[derive(Debug, Clone)]
-struct ProgInfo {
+pub(crate) struct ProgInfo {
     id: u32,
     kind: &'static str,
     tag: String,
@@ -142,6 +142,41 @@ fn holders(host: &Host) -> HashMap<u32, Vec<serde_json::Value>> {
     m
 }
 
+/// Whether a process is minsec-id itself (the daemon, or a scan).
+fn is_minsec_id(holder: &serde_json::Value) -> bool {
+    holder["exe"]
+        .as_str()
+        .map(|e| e.trim_end_matches(" (deleted)"))
+        .is_some_and(|e| e.rsplit('/').next() == Some("minsec-id"))
+}
+
+type Holders = HashMap<u32, Vec<serde_json::Value>>;
+
+/// Tracing-kind programs nothing known explains, and who holds each
+/// program. A `msid_` name is minsec-id's only if a minsec-id process
+/// holds it: the prefix alone is no alibi.
+pub(crate) fn unexplained(host: &Host) -> std::io::Result<(Vec<ProgInfo>, Holders)> {
+    let progs: Vec<ProgInfo> = programs()?
+        .into_iter()
+        .filter(|p| !KNOWN.contains(&p.name.as_str()))
+        .collect();
+    if progs.is_empty() {
+        return Ok((progs, HashMap::new()));
+    }
+    let held = holders(host);
+    let unknown = progs
+        .into_iter()
+        .filter(|p| {
+            if p.name.starts_with("msid_") {
+                let by = held.get(&p.id).map(Vec::as_slice).unwrap_or_default();
+                return by.is_empty() || !by.iter().all(is_minsec_id);
+            }
+            true
+        })
+        .collect();
+    Ok((unknown, held))
+}
+
 impl Check for BpfProgs {
     fn id(&self) -> &'static str {
         "bpf-prog-unknown"
@@ -160,21 +195,13 @@ impl Check for BpfProgs {
     }
 
     fn run(&self, ctx: &Ctx, _: &mut Anchors) -> anyhow::Result<Vec<Finding>> {
-        let progs = match programs() {
-            Ok(p) => p,
+        let (unknown, held) = match unexplained(ctx.host) {
+            Ok(u) => u,
             Err(e) if e.raw_os_error() == Some(libc::EPERM) => {
                 return Err(Unavailable("enumerating BPF programs needs CAP_SYS_ADMIN (run as root)".into()).into())
             }
             Err(e) => anyhow::bail!("bpf: {e}"),
         };
-        let unknown: Vec<ProgInfo> = progs
-            .into_iter()
-            .filter(|p| !KNOWN.contains(&p.name.as_str()) && !p.name.starts_with("msid_"))
-            .collect();
-        if unknown.is_empty() {
-            return Ok(Vec::new());
-        }
-        let held = holders(ctx.host);
         Ok(unknown
             .into_iter()
             .map(|p| {

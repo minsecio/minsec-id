@@ -59,7 +59,7 @@ _minsec_id() {
         cur=${words[cword]} prev=${words[cword - 1]}
     fi
 
-    local subcommands='scan status findings show accept unaccept verify baseline checks enable disable inspect check events help'
+    local subcommands='scan status findings show accept unaccept verify baseline checks enable disable inspect check daemon events help'
     local global_opts='-c --config-dir --json -h --help'
 
     # Locate the subcommand and count the positional arguments after it.
