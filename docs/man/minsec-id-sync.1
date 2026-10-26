@@ -1,0 +1,177 @@
+.TH MINSEC-ID-SYNC 1 "2026-10-26" "minsec-id" "User Commands"
+.SH NAME
+minsec-id-sync \- share minsec-id finding counts with minsec.io and ask the crowd about modified package files
+.SH SYNOPSIS
+.B minsec-id-sync
+.RI [ options ]
+.I command
+.SH DESCRIPTION
+.B minsec-id-sync
+is the opt-in crowd client for
+.BR minsec-id (1).
+It is a short-lived program run hourly by a systemd timer.
+It enrolls the host with minsec.io, reports how many findings of each check
+are open, and asks whether other hosts report the same content for this
+host's modified package files.
+.PP
+The scanner and the daemon contain no HTTP or TLS client.
+This helper reads the scanner's
+.I state.json
+and writes only its own directory; the crowd's answers reach the scanner as a
+file,
+.IR crowd.json ,
+which the next scan reads.
+Creating
+.I /etc/minsec-id/sync.toml
+is the opt-in switch used by the packaged timer.
+.SH OPTIONS
+.TP
+.BR \-c " " \fIfile\fR ", " \-\-config " " \fIfile\fR
+Read configuration from
+.I file
+instead of
+.IR /etc/minsec-id/sync.toml .
+.TP
+.BR \-h ", " \-\-help
+Show help and exit.
+.TP
+.BR \-V ", " \-\-version
+Show the program version and exit.
+.SH COMMANDS
+.SS enroll
+Create an Ed25519 signing key if necessary, solve the server's enrollment
+proof-of-work challenge, and save the assigned host ID.
+The host enrolls as a minsec-id agent: its key can submit findings and hash
+checks and nothing else.
+If this state is already present, print the existing host ID and return.
+If the local host ID was lost but the server already knows the key, the key
+is moved to
+.I key.old
+and enrollment is retried once with a new key.
+.SS report
+Count the open findings in the scanner's state, per check and severity, and
+submit the counts: open, accepted, and new since the previous report.
+A report also carries the checks the last scan ran and the distribution
+release (os-release
+.B ID
+and
+.BR VERSION_ID ).
+It never carries a finding's subject, message, or detail.
+Each report is also the host's heartbeat.
+.SS check
+For each open
+.B pkg-modified
+finding about content, send the package (the rpm NEVRA or the dpkg
+.IR name : arch = version ),
+the path, the digest algorithm, the digest the package database records, and
+the digest of the file on disk; never the file.
+minsec.io answers with how many other hosts report the same content for that
+package and path, how many report other content, and how many record a
+different expected digest in their own package databases, each counted once
+per enrollment network.
+The verdict is
+.B shared
+when at least the server's quorum (three by default) of other hosts report
+the same content, and
+.B rare
+otherwise.
+.PP
+Answers are written to
+.IR crowd.json ;
+the next scan adds them to the finding's message and to its detail as
+.BR crowd .
+Severity is never changed by the crowd: content many independent hosts share
+was most likely changed by the package's own scripts or a common local
+practice, but a crowd that could lower severities would be worth poisoning.
+Each finding is asked about again daily while it stays open, which also keeps
+this host's vote on the server.
+.PP
+rpm packages no key signed are not sent (their names are often local) unless
+.B unsigned
+is set, and packages matching
+.B exclude
+are never sent.
+.SS run
+Perform the timer workflow: enroll if necessary, then
+.B report
+and
+.B check
+according to configuration.
+If the configuration file does not exist, exit successfully without output or
+side effects.
+This absent-file behavior is specific to
+.BR run ;
+the other commands report an error.
+.SS status
+Print the configured server, public key, host ID, next report sequence
+number, and how many crowd answers are on file.
+A key is generated if one does not already exist.
+.SH CONFIGURATION
+.I /etc/minsec-id/sync.toml
+is TOML; every key is optional and unknown keys are an error.
+.TP
+.BR server " (default " \(dqhttps://api.minsec.io\(dq )
+The backend's base URL.
+.TP
+.BR state_dir " (default " \(dq/var/lib/minsec-id\(dq )
+The scanner's state directory.
+Its
+.I state.json
+is read; its
+.I sync
+directory holds this client's files.
+.TP
+.BR findings " (default " true )
+Report finding counts.
+.TP
+.BR hashcheck " (default " true )
+Ask the crowd about modified package files.
+.TP
+.BR unsigned " (default " false )
+Include rpm packages no key signed in hash checks.
+.TP
+.BR exclude " (default " [] )
+Package ids never sent in a hash check: globs where
+.B *
+matches anything, such as
+.BR \(dqacme-*\(dq .
+.SH OPERATION
+The packaged
+.B minsec-id-sync.timer
+runs
+.B minsec-id-sync run
+about once an hour: five minutes after boot, then an hour after each run,
+with up to ten minutes of randomized delay.
+The service runs as root with no capabilities, so it can read the scanner's
+root-only state file as its owner but nothing past file permissions, and
+writes only
+.IR /var/lib/minsec-id/sync .
+It needs HTTPS access to the server and a CA trust store.
+.PP
+To opt out, remove
+.IR /etc/minsec-id/sync.toml .
+Existing crowd answers stay in
+.I crowd.json
+until removed; delete it to drop them from findings.
+.SH FILES
+.TP
+.I /etc/minsec-id/sync.toml
+Configuration; its existence is the opt-in.
+.TP
+.I /usr/share/doc/minsec-id/sync.toml.example
+An annotated example.
+.TP
+.I /var/lib/minsec-id/sync/key
+The Ed25519 identity key (32-byte seed, mode 0600).
+.TP
+.I /var/lib/minsec-id/sync/state.json
+Host ID, report sequence, and when the last report was accepted.
+.TP
+.I /var/lib/minsec-id/sync/crowd.json
+The crowd's answers, by finding fingerprint, read by the scanner.
+.SH EXIT STATUS
+0 on success, 1 on error.
+.SH SEE ALSO
+.BR minsec-id (1),
+.BR minsec-id.toml (5),
+https://minsec.io/privacy

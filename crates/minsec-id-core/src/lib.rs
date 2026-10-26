@@ -7,6 +7,7 @@
 pub mod check;
 pub mod config;
 pub mod control;
+pub mod crowd;
 pub mod digest;
 pub mod dirty;
 pub mod duration;

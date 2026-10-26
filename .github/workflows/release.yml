@@ -43,11 +43,13 @@ jobs:
           cargo install --locked cargo-zigbuild@0.23.0 cargo-deb@3.7.0 cargo-generate-rpm@0.21.0
       - name: Build (glibc ${{ env.GLIBC_FLOOR }})
         run: |
-          cargo zigbuild --release --target ${{ matrix.target }}.${{ env.GLIBC_FLOOR }} -p minsec-id
+          cargo zigbuild --release --target ${{ matrix.target }}.${{ env.GLIBC_FLOOR }} -p minsec-id -p minsec-id-sync
           mkdir -p target/release
-          cp target/${{ matrix.target }}/release/minsec-id target/release/minsec-id
+          cp target/${{ matrix.target }}/release/minsec-id target/${{ matrix.target }}/release/minsec-id-sync target/release/
       - name: Verify dependency floor
-        run: scripts/check-glibc.sh target/release/minsec-id ${{ env.GLIBC_FLOOR }}
+        run: |
+          scripts/check-glibc.sh target/release/minsec-id ${{ env.GLIBC_FLOOR }}
+          scripts/check-glibc.sh target/release/minsec-id-sync ${{ env.GLIBC_FLOOR }}
       - name: Package
         run: |
           cargo deb -p minsec-id --no-build --no-strip --target ${{ matrix.target }}
@@ -56,6 +58,7 @@ jobs:
           cp target/${{ matrix.target }}/debian/*.deb dist/
           cp target/${{ matrix.target }}/generate-rpm/*.rpm dist/
           cp target/release/minsec-id dist/minsec-id-${{ matrix.arch }}
+          cp target/release/minsec-id-sync dist/minsec-id-sync-${{ matrix.arch }}
           ls -la dist
       - name: Inspect packages
         run: |
@@ -98,6 +101,11 @@ jobs:
           rc=0; minsec-id scan || rc=$?
           test "$rc" -eq 0 -o "$rc" -eq 2
           minsec-id status
+          minsec-id-sync --version
+          # Not opted in: the timer's run is a quiet no-op.
+          minsec-id-sync run
+          test -s /usr/share/doc/minsec-id/sync.toml.example
+          test -s /usr/share/man/man1/minsec-id-sync.1
           test -s /usr/share/man/man1/minsec-id.1
           test -s /usr/lib/systemd/system/minsec-id.service
           test -s /usr/share/bash-completion/completions/minsec-id

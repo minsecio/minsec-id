@@ -170,6 +170,12 @@ Installed files against package digests, modes, and link targets, honouring
 rpm's
 .B %verify
 attributes (full scans).
+Where
+.BR minsec-id-sync (1)
+is set up, a
+.B pkg-modified
+finding also says whether other hosts report the same content for that
+package and path; that never changes its severity.
 .TP
 .B exe-unowned
 Executables, top-level shared libraries, and setuid, setgid, or file
@@ -423,6 +429,11 @@ The same as
 .I verified.bin
 for flatpak and ostree objects and for snaps.
 .TP
+.I /var/lib/minsec-id/sync/crowd.json
+The crowd's answers about modified package files, written by
+.BR minsec-id-sync (1)
+and read by each scan.
+.TP
 .I /run/minsec-id/minsec-id.sock
 The daemon's control socket (root only).
 .SH EXIT STATUS
@@ -446,6 +457,7 @@ journalctl SYSLOG_IDENTIFIER=minsec-id \-p warning
 .fi
 .SH SEE ALSO
 .BR minsec-id.toml (5),
+.BR minsec-id-sync (1),
 .BR minsec (1),
 .BR rpm (8),
 .BR dpkg (1)

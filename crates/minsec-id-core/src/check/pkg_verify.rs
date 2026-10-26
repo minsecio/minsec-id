@@ -94,6 +94,10 @@ impl Run<'_> {
         let mut d = detail;
         if let Some(o) = d.as_object_mut() {
             o.insert("package".into(), f.pkg.id.clone().into());
+            o.insert("manager".into(), serde_json::json!(f.pkg.manager));
+            if f.pkg.manager == crate::pkgdb::Manager::Rpm {
+                o.insert("signed".into(), f.pkg.key_id.is_some().into());
+            }
         }
         self.out
             .push(Finding::new(id, sev, f.path(), salient).message(msg).detail(d));

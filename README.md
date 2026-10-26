@@ -22,9 +22,10 @@ for the design and roadmap.
 
 ## Status
 
-Phase 3: the scanner, the optional eBPF daemon, and support for flatpak,
-snap, image-based systems (ostree, bootc, composefs), system extensions,
-and IMA are complete. Reporting to minsec.io is next; see
+Phase 4: the scanner, the optional eBPF daemon, support for flatpak, snap,
+image-based systems (ostree, bootc, composefs), system extensions, and IMA,
+and the opt-in crowd client for minsec.io are complete. Fleet management
+(organizations, missed-heartbeat alerts) is next; see
 [docs/PLAN.md](docs/PLAN.md).
 
 ## Checks
@@ -137,6 +138,42 @@ The daemon needs a kernel with BTF (`/sys/kernel/btf/vmlinux`) and
 CAP_BPF and CAP_PERFMON. It cannot run under `lockdown=confidentiality`,
 which forbids BPF programs from reading kernel memory.
 
+## The crowd (minsec.io)
+
+`minsec-id-sync`, run hourly by `minsec-id-sync.timer`, is the only part of
+minsec-id with a network stack, and it does nothing until
+`/etc/minsec-id/sync.toml` exists (an annotated example is in
+`/usr/share/doc/minsec-id/sync.toml.example`). It then enrolls with
+minsec.io and:
+
+- **reports finding counts**: how many findings of each check and severity
+  are open, accepted, and new, and which checks ran. Never a path, message,
+  or detail. Each report is also the host's heartbeat.
+- **asks about modified package files**: for each `pkg-modified` finding it
+  sends the package, the path, and two digests (what the package database
+  records, what is on disk), never the file. minsec.io answers with how many
+  other hosts, counted once per network, report the same content. The next
+  scan adds the answer to the finding:
+
+```
+/usr/lib/systemd/system/logrotate.timer differs from logrotate-3.22.0-4.fc44.x86_64
+  (crowd: the same content is reported by 41 other hosts)
+```
+
+Content many independent hosts share was most likely changed by the
+package's own scripts or a common local practice; content no other host
+reports is this host's alone. The crowd never changes a finding's severity:
+a crowd that could would be worth poisoning. rpm packages no key signed are
+not named unless `unsigned = true`, and `exclude` keeps others out.
+
+```sh
+sudo cp /usr/share/doc/minsec-id/sync.toml.example /etc/minsec-id/sync.toml
+sudo minsec-id-sync run
+sudo minsec-id-sync status
+```
+
+See `minsec-id-sync(1)` and https://minsec.io/privacy.
+
 ## What it does not claim
 
 A kernel rootkit loaded before `minsec-id` can blind it. `minsec-id` can see
@@ -155,11 +192,11 @@ Building needs Rust 1.87 or newer and clang (for the BPF programs).
 
 ```sh
 cargo build --release
-sudo install -m 0755 target/release/minsec-id /usr/bin/minsec-id
+sudo install -m 0755 target/release/minsec-id target/release/minsec-id-sync /usr/bin/
 sudo install -d /etc/minsec-id && sudo install -m 0644 packaging/minsec-id.toml /etc/minsec-id/
 sudo install -m 0644 packaging/minsec-id*.{service,timer} /etc/systemd/system/
 sudo install -m 0644 packaging/minsec-id.tmpfiles.conf /usr/lib/tmpfiles.d/minsec-id.conf
-sudo install -m 0644 docs/man/minsec-id.1 /usr/share/man/man1/
+sudo install -m 0644 docs/man/minsec-id.1 docs/man/minsec-id-sync.1 /usr/share/man/man1/
 sudo install -m 0644 docs/man/minsec-id.toml.5 /usr/share/man/man5/
 scripts/install-completions.sh --user
 sudo systemd-tmpfiles --create minsec-id.conf
@@ -201,8 +238,10 @@ you can review and distribute, not hidden state.
 | `minsec-id check` | validate configuration |
 | `minsec-id daemon` | the eBPF monitor, in the foreground |
 | `minsec-id events` | the findings log |
+| `minsec-id-sync enroll\|report\|check\|run\|status` | the crowd client |
 
-Complete references: `minsec-id(1)` and `minsec-id.toml(5)`.
+Complete references: `minsec-id(1)`, `minsec-id.toml(5)`, and
+`minsec-id-sync(1)`.
 
 ## License
 

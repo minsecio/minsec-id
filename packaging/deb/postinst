@@ -9,9 +9,10 @@ if [ "$1" = "configure" ]; then
             systemctl try-restart minsec-id.service >/dev/null 2>&1 || true
         else
             # Fresh install: scanning is read-only, so start the timers now.
-            systemctl enable --now minsec-id-scan.timer minsec-id-scan-full.timer >/dev/null 2>&1 || true
+            systemctl enable --now minsec-id-scan.timer minsec-id-scan-full.timer minsec-id-sync.timer >/dev/null 2>&1 || true
             echo "minsec-id installed. First results after the next scan, or now: minsec-id scan"
             echo "Real-time monitoring is optional: systemctl enable --now minsec-id"
+            echo "The crowd (minsec.io) is opt-in: see /usr/share/doc/minsec-id/sync.toml.example"
         fi
     fi
 fi

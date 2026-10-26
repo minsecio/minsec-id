@@ -1,0 +1,34 @@
+# minsec-id crowd configuration — /etc/minsec-id/sync.toml
+#
+# Creating this file is the opt-in: with it in place, the minsec-id-sync
+# timer enrolls this system with minsec.io and, hourly,
+#
+#  - reports how many findings of each check and severity are open here
+#    (counts only: never a path, message, or detail), which is also this
+#    host's heartbeat;
+#  - asks whether other hosts report the same content for this host's
+#    modified package files: for each pkg-modified finding it sends the
+#    package (NEVRA or name:arch=version), the path, and the two digests,
+#    never the file. The answer is added to the finding: content many
+#    independent hosts share was most likely changed by the package's own
+#    scripts; content no other host reports is this host's alone.
+#
+# See https://minsec.io/privacy. Delete the file to opt back out.
+#
+# Every setting is optional; the defaults are shown.
+
+#server = "https://api.minsec.io"
+
+# Report finding counts (and the heartbeat).
+#findings = true
+
+# Ask the crowd about modified package files.
+#hashcheck = true
+
+# rpm packages no key signed are left out of hash checks: their names are
+# often local. Set to send them too.
+#unsigned = false
+
+# Packages never named in a hash check: globs over the package id, where *
+# matches anything.
+#exclude = ["acme-*"]

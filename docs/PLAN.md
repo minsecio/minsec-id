@@ -447,6 +447,61 @@ Phase 3 as built, where it differs from the plan above:
     aggregated per org)
   - Extract `minsec-common` first.
 
+Phase 4 as built, where it differs from the plan above:
+- **Split in two.** This phase is the anonymous crowd path; fleet
+  management (`install_token` → organization binding, missed-heartbeat
+  alerts, findings aggregated per organization) is Phase 4b below.
+- **No `minsec-common` crate.** Only `duration.rs` was ever copied, so
+  there was nothing to extract. What is shared is `minsec-proto`, a git
+  dependency on the minsec repo pinned by revision: it gained
+  purpose-bound signing, the enrollment `product` field, the minsec-id wire
+  types, and `minsec_proto::key` (the identity key file, now used by both
+  sync clients).
+- **Signing purposes, not one prefix.** The canonical string's first line
+  names the endpoint: `minsec-report-v1` (unchanged), `minsec-id-findings-v1`,
+  `minsec-id-hashcheck-v1`. On top of that the backend binds each agent to the
+  product it enrolled as, so neither product's key works on the other's
+  endpoints.
+- **The heartbeat is the findings report**, sent hourly: `last_seen_at`, and
+  a per-day row (`agent_days`) with the distribution release and the checks
+  that ran, the denominator for the counts.
+- **Repo-key fingerprint prevalence was not built.** Hash checks and finding
+  counts cover the planned crowd value; key prevalence can come later on the
+  same transport.
+- **What a hash check answers.** For a `pkg-modified` finding, minsec.io
+  counts other hosts that report the same content for the same package and
+  path, other content, and a different expected digest. A host is counted
+  once per enrollment network, only if it is an active minsec-id agent past
+  its probation period (as in scoring), and never from the asker's own
+  network. `shared` at the quorum (3), `rare` below it. The scanner adds the
+  answer to the finding's message and detail and **never changes its
+  severity**: the crowd informs triage, and a crowd that could lower
+  severities would be worth poisoning. Only `pkg-modified` (rpm, dpkg) is
+  sent; ostree and flatpak modifications have no package database digest to
+  compare and are rare enough on image-based systems not to need triage
+  help.
+- **What leaves the host**, all opt-in by creating `/etc/minsec-id/sync.toml`:
+  finding counts per check and severity, check ids, os-release `ID` and
+  `VERSION_ID`, the agent version; for hash checks the package id, path,
+  algorithm, and the two digests. rpm packages no key signed are not named
+  by default (their names are often local), and `exclude` globs keep others
+  out.
+- **Backend:** `agents.product`; `hash_votes` (pruned 30 days after a host
+  stops repeating a vote; clients repeat daily); `finding_counts` and
+  `agent_days`, daily partitions dropped after 90 days; a per-agent daily
+  hash-check quota (2000 items) admitted under the agent row lock.
+- **Verification:** the shared signing vectors cover the new purposes on
+  both sides; `internal/api/minsecid_test.go` covers product separation,
+  cross-purpose replay, findings accumulation, quorum per network, and
+  quarantine; `tests/e2e-sync.sh` runs three hosts against a real `minsecd`
+  rootlessly (the modified file is an overlay in a user namespace). The
+  backend is private, so that test runs locally, not in this repo's CI.
+
+**Phase 4b (fleet management):** an `install_token` binds an enrollment to
+an organization; per-organization views of hosts, heartbeats, and finding
+counts in the operator console; missed-heartbeat alerts (a host that stops
+reporting is the tell for a silenced agent) by webhook or mail.
+
 **Phase 5 (response):** opt-in BPF-LSM enforcement policies (deny exec from tmpfs or memfd, deny
 module loads after boot, deny unexpected BPF loads), correlation with minsec (SSH source IP of the
 session that spawned a flagged process), and IMA/TPM attestation via minsec.io.

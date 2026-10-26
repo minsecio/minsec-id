@@ -35,13 +35,17 @@ jobs:
       - run: cargo build --release
       - name: binary size gate
         run: |
-          size=$(stat -c %s target/release/minsec-id)
-          echo "minsec-id: $size bytes"
-          test "$size" -le "$MAX_BINARY_BYTES"
+          for b in minsec-id minsec-id-sync; do
+            size=$(stat -c %s target/release/$b)
+            echo "$b: $size bytes"
+            test "$size" -le "$MAX_BINARY_BYTES"
+          done
       # The glibc floor is enforced by the release build (cargo-zigbuild);
       # this native build only checks the shared-library surface.
       - name: shared-library surface (glibc + libgcc_s only)
-        run: scripts/check-glibc.sh target/release/minsec-id 99
+        run: |
+          scripts/check-glibc.sh target/release/minsec-id 99
+          scripts/check-glibc.sh target/release/minsec-id-sync 99
       - name: scan the CI host
         run: |
           printf '[output]\njournal = false\n[paths]\nstate_dir = "%s"\n' "$RUNNER_TEMP/state" > "$RUNNER_TEMP/minsec-id.toml"

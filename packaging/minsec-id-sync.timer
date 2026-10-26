@@ -1,0 +1,11 @@
+[Unit]
+Description=Run minsec-id crowd sync hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+# Spread agent traffic across the hour; nothing here is latency sensitive.
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
