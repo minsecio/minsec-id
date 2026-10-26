@@ -45,7 +45,7 @@ fn kallsyms_modules(host: &Host) -> BTreeSet<String> {
 }
 
 /// `modules.dep`: module name → path, for the running kernel.
-fn modules_dep(host: &Host) -> Option<(String, BTreeMap<String, String>)> {
+pub(crate) fn modules_dep(host: &Host) -> Option<(String, BTreeMap<String, String>)> {
     let rel = host.read_opt("/proc/sys/kernel/osrelease")?;
     let base = format!("/usr/lib/modules/{rel}");
     let base = if host.exists(&base) {

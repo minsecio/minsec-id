@@ -82,7 +82,7 @@ function __minsec_id_accepted
     command $cmd (__minsec_id_config_args) findings --all 2>/dev/null | sed -n 's/.*(accepted: \(.*\))$/\1/p' | sort -u
 end
 
-set -l subcommands scan status findings show accept unaccept verify baseline checks enable disable inspect check events help
+set -l subcommands scan status findings show accept unaccept verify baseline checks enable disable inspect check daemon events help
 
 complete -c minsec-id -f
 complete -c minsec-id -s c -l config-dir -x -a '(__fish_complete_directories)' -d 'Configuration directory'
@@ -99,10 +99,11 @@ complete -c minsec-id -n __minsec_id_needs_command -a unaccept -d 'Remove an acc
 complete -c minsec-id -n __minsec_id_needs_command -a verify -d 'Verify a file or package against the package database'
 complete -c minsec-id -n __minsec_id_needs_command -a baseline -d 'Show or reset the recorded baselines'
 complete -c minsec-id -n __minsec_id_needs_command -a checks -d 'List checks'
-complete -c minsec-id -n __minsec_id_needs_command -a enable -d 'Enable a check'
-complete -c minsec-id -n __minsec_id_needs_command -a disable -d 'Disable a check'
+complete -c minsec-id -n __minsec_id_needs_command -a enable -d 'Enable a check or daemon rule'
+complete -c minsec-id -n __minsec_id_needs_command -a disable -d 'Disable a check or daemon rule'
 complete -c minsec-id -n __minsec_id_needs_command -a inspect -d 'Report host capabilities, configuration sources, and checks'
 complete -c minsec-id -n __minsec_id_needs_command -a check -d 'Validate configuration'
+complete -c minsec-id -n __minsec_id_needs_command -a daemon -d 'Run the eBPF monitor in the foreground'
 complete -c minsec-id -n __minsec_id_needs_command -a events -d 'Print the findings log'
 complete -c minsec-id -n __minsec_id_needs_command -a help -d 'Print help for a subcommand'
 

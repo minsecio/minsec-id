@@ -16,18 +16,19 @@ use std::path::PathBuf;
 mod accounts;
 mod antiforensics;
 mod boot;
-mod bpf_progs;
+pub(crate) mod bpf_progs;
 mod exe_unowned;
 mod ftrace;
 mod kernel_tainted;
-mod kmod;
+pub(crate) mod kmod;
 mod net;
-mod persistence;
+pub(crate) mod persistence;
 mod pkg_verify;
-mod proc_exe;
+pub(crate) mod proc_exe;
+mod proc_hidden;
 mod proc_preload;
 mod repos;
-mod service_shell;
+pub(crate) mod service_shell;
 mod ssh_keys;
 
 pub use pkg_verify::{verify, VerifyReport};
@@ -39,6 +40,8 @@ pub enum Cost {
     Quick,
     /// Reads file contents at scale: full scans only.
     Full,
+    /// A daemon rule: runs as events happen, not in scans.
+    Daemon,
 }
 
 pub struct Ctx<'a> {
@@ -173,6 +176,7 @@ static ALL: &[&dyn Check] = &[
     &repos::RepoKeys,
     &repos::Repos,
     &proc_exe::ProcExe,
+    &proc_hidden::ProcHidden,
     &proc_preload::ProcPreload,
     &service_shell::ServiceShell,
     &net::NetListeners,

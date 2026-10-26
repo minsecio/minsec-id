@@ -23,7 +23,7 @@ pub struct Persistence;
 const MAX_HASH: u64 = 1 << 20;
 
 /// (path, depth: 0 = the file itself, 1 = directory entries, n = recursive, severity)
-const SYSTEM: &[(&str, u32, Severity)] = &[
+pub(crate) const SYSTEM: &[(&str, u32, Severity)] = &[
     ("/etc/systemd/system", 3, Severity::Medium),
     ("/etc/systemd/user", 3, Severity::Medium),
     ("/usr/lib/systemd/system", 2, Severity::Medium),
@@ -81,7 +81,7 @@ const SYSTEM: &[(&str, u32, Severity)] = &[
 ];
 
 /// PAM module directories: an unowned module here is critical.
-const PAM_MODULES: &[&str] = &[
+pub(crate) const PAM_MODULES: &[&str] = &[
     "/usr/lib64/security",
     "/usr/lib/security",
     "/usr/lib/x86_64-linux-gnu/security",
@@ -101,7 +101,24 @@ const PER_USER: &[(&str, u32)] = &[
     (".ssh/rc", 0),
 ];
 
+/// atd's own bookkeeping in its spool, rewritten as jobs come and go.
+const SPOOL_NOISE: &[&str] = &["/var/spool/at/.SEQ", "/var/spool/at/.lockfile"];
+
+/// The severity a change to `path` has, if it is a persistence location.
+pub(crate) fn location(path: &str) -> Option<Severity> {
+    if SPOOL_NOISE.contains(&path) {
+        return None;
+    }
+    SYSTEM.iter().find_map(|(p, depth, sev)| {
+        let hit = path == *p || (*depth > 0 && path.strip_prefix(p).is_some_and(|r| r.starts_with('/')));
+        hit.then_some(*sev)
+    })
+}
+
 fn collect(host: &Host, path: &str, depth: u32, out: &mut Vec<String>) {
+    if SPOOL_NOISE.contains(&path) {
+        return;
+    }
     let Ok(md) = std::fs::symlink_metadata(host.path(path)) else {
         return;
     };

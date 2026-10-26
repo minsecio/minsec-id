@@ -1,0 +1,15 @@
+[package]
+name = "minsec-id-bpf"
+description = "minsec-id's eBPF programs (C, CO-RE) and their loader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[dependencies]
+anyhow.workspace = true
+aya.workspace = true
+libc.workspace = true
+tracing.workspace = true

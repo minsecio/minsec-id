@@ -1,0 +1,52 @@
+[Unit]
+Description=minsec-id eBPF monitor
+Documentation=man:minsec-id(1) https://github.com/minsecio/minsec-id
+
+[Service]
+ExecStart=/usr/bin/minsec-id daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+StateDirectory=minsec-id
+StateDirectoryMode=0700
+RuntimeDirectory=minsec-id
+RuntimeDirectoryMode=0700
+ConfigurationDirectory=minsec-id
+
+# Root, holding only what monitoring needs: CAP_BPF and CAP_PERFMON to load
+# the probes, CAP_SYS_PTRACE to read other processes' /proc entries and pid
+# 1's root, CAP_DAC_READ_SEARCH to read root-only files. No module loading,
+# no writes outside its state and runtime directories, no network. It does
+# not use ProtectKernelModules (the module rule reads modules.dep) or
+# ProtectKernelTunables (tracefs and BTF are read under /sys, read-only
+# here). What it watches is the host's view: the probes run in the kernel,
+# and paths are resolved there, so its own mount namespace does not matter.
+# The notify hook inherits this sandbox.
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ReadOnlyPaths=/proc/sys /sys
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallFilter=bpf perf_event_open
+RestrictAddressFamilies=AF_UNIX
+Environment=MALLOC_ARENA_MAX=1
+# Loading the package database to learn which programs are owned briefly
+# takes tens of MB on a large desktop; steady state is a few MB.
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

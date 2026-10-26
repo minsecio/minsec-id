@@ -30,7 +30,7 @@ pub(crate) fn suspicious_location(path: &str, host_ns: bool) -> bool {
 }
 
 /// Container runtimes re-exec themselves from a memfd (CVE-2019-5736).
-fn benign_memfd(name: &str) -> bool {
+pub(crate) fn benign_memfd(name: &str) -> bool {
     name.starts_with("runc_cloned") || name.starts_with("crun") || name.starts_with("youki")
 }
 

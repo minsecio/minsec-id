@@ -1,6 +1,7 @@
 //! `minsec-id`: scanner and CLI in one binary.
 
 mod cli;
+mod daemon;
 
 use clap::Parser;
 use cli::{Cli, Cmd};
@@ -8,7 +9,7 @@ use minsec_id_core::config::{self, Config};
 use minsec_id_core::events::{now, EventLog};
 use minsec_id_core::scan::{self, Mode};
 use minsec_id_core::state::{OpenFinding, State};
-use minsec_id_core::{check, inspect, sink, Host, Severity};
+use minsec_id_core::{check, control, inspect, monitor, sink, Host, Severity};
 use std::time::Duration;
 
 /// `scan` exit status when unaccepted findings are open, so the scanner can
@@ -16,8 +17,10 @@ use std::time::Duration;
 const EXIT_FINDINGS: i32 = 2;
 
 fn main() {
-    init_logging();
-    match run() {
+    let cli = Cli::parse();
+    // The daemon reports what it attached and when it reloads; a scan only warns.
+    init_logging(if matches!(cli.cmd, Cmd::Daemon) { "info" } else { "warn" });
+    match run(cli) {
         Ok(code) => std::process::exit(code),
         Err(e) => {
             eprintln!("minsec-id: {e:#}");
@@ -26,8 +29,7 @@ fn main() {
     }
 }
 
-fn run() -> anyhow::Result<i32> {
-    let cli = Cli::parse();
+fn run(cli: Cli) -> anyhow::Result<i32> {
     let host = Host::with_root(&cli.root);
     match cli.cmd {
         Cmd::Scan {
@@ -62,6 +64,7 @@ fn run() -> anyhow::Result<i32> {
         Cmd::Status => {
             let cfg = Config::load_dir(&cli.config_dir)?;
             let state = State::load(&cfg.state_file())?;
+            let daemon = daemon_status(&cfg);
             if cli.json {
                 let open: Vec<&OpenFinding> = state.unaccepted().collect();
                 println!(
@@ -73,6 +76,10 @@ fn run() -> anyhow::Result<i32> {
                         "open": open.len(),
                         "by_severity": by_severity(open.iter().copied()),
                         "accepted": state.open.len() - open.len(),
+                        "daemon": match &daemon {
+                            Ok(s) => serde_json::to_value(s)?,
+                            Err(e) => serde_json::json!({ "running": false, "error": e }),
+                        },
                     })
                 );
                 return Ok(0);
@@ -113,6 +120,24 @@ fn run() -> anyhow::Result<i32> {
                 for (id, e) in &s.errors {
                     println!("  {id}: {e}");
                 }
+            }
+            match daemon {
+                Ok(d) => {
+                    let found: u64 = d.stats.findings.values().sum();
+                    let events: u64 = d.stats.events.values().sum();
+                    let attached = d.probes.iter().filter(|p| p.attached).count();
+                    println!(
+                        "daemon: up {} · {attached}/{} probes · {events} events · {found} findings · {} lost · {} KiB",
+                        minsec_id_core::duration::format(Duration::from_secs(d.uptime)),
+                        d.probes.len(),
+                        d.dropped,
+                        d.rss_kb
+                    );
+                    for p in d.probes.iter().filter(|p| !p.attached) {
+                        println!("  probe {} not attached: {}", p.probe, p.error.as_deref().unwrap_or(""));
+                    }
+                }
+                Err(e) => println!("daemon: {e}"),
             }
             Ok(0)
         }
@@ -189,8 +214,8 @@ fn run() -> anyhow::Result<i32> {
                 lookup(&state, &finding)?.finding.key()
             };
             let (id, subject) = key.split_once(':').expect("key has a colon");
-            if check::get(id).is_none() {
-                anyhow::bail!("unknown check `{id}` (see `minsec-id checks`)");
+            if check::producer(id).is_none() && monitor::rule_for(id).is_none() {
+                anyhow::bail!("unknown finding id `{id}` (see `minsec-id checks`)");
             }
             if subject.is_empty() {
                 anyhow::bail!("empty subject in `{key}` (use `{id}:*` to accept the whole check)");
@@ -308,6 +333,7 @@ fn run() -> anyhow::Result<i32> {
                     match c.cost {
                         check::Cost::Quick => "quick",
                         check::Cost::Full => "full",
+                        check::Cost::Daemon => "daemon",
                     },
                     c.description,
                     c.unavailable
@@ -371,6 +397,11 @@ fn run() -> anyhow::Result<i32> {
             }
             Ok(0)
         }
+        Cmd::Daemon => {
+            let cfg = Config::load_dir(&cli.config_dir)?;
+            daemon::run(cfg)?;
+            Ok(0)
+        }
         Cmd::Events { last } => {
             let cfg = Config::load_dir(&cli.config_dir)?;
             let all = EventLog::read_all(&cfg.events_file());
@@ -412,8 +443,21 @@ fn finish(json: bool, msg: &str) -> anyhow::Result<i32> {
     Ok(0)
 }
 
+/// The running daemon's status, or why there is none.
+fn daemon_status(cfg: &Config) -> Result<control::Status, String> {
+    let sock = &cfg.paths.socket;
+    match control::call_with_timeout(sock, &control::Request::Status, Duration::from_secs(2)) {
+        Ok(r) => r.status.ok_or_else(|| r.error.unwrap_or_else(|| "no status".into())),
+        Err(e) => Err(match e.downcast_ref::<std::io::Error>().map(|e| e.kind()) {
+            Some(std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) => "not running".into(),
+            Some(std::io::ErrorKind::PermissionDenied) => format!("{} is root's (run as root)", sock.display()),
+            _ => format!("{e:#}"),
+        }),
+    }
+}
+
 fn set_enabled(config_dir: &std::path::Path, json: bool, id: &str, enabled: bool) -> anyhow::Result<i32> {
-    if check::get(id).is_none() {
+    if check::get(id).is_none() && monitor::rule(id).is_none() {
         anyhow::bail!("unknown check `{id}` (see `minsec-id checks`)");
     }
     let path = config::edit_dropin(config_dir, &format!("{id}.toml"), |t| {
@@ -423,9 +467,14 @@ fn set_enabled(config_dir: &std::path::Path, json: bool, id: &str, enabled: bool
     finish(
         json,
         &format!(
-            "{} {id} ({}); applies from the next scan",
+            "{} {id} ({}); applies from the next {}",
             if enabled { "enabled" } else { "disabled" },
-            path.display()
+            path.display(),
+            if monitor::rule(id).is_some() {
+                "daemon restart"
+            } else {
+                "scan"
+            }
         ),
     )
 }
@@ -529,9 +578,9 @@ fn print_inspection(i: &inspect::Inspection) {
     }
 }
 
-fn init_logging() {
+fn init_logging(default: &str) {
     use tracing_subscriber::EnvFilter;
-    let filter = EnvFilter::try_from_env("MINSEC_ID_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_from_env("MINSEC_ID_LOG").unwrap_or_else(|_| EnvFilter::new(default));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)

@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/minsec-id-core", "crates/minsec-id"]
+members = ["crates/minsec-id-bpf", "crates/minsec-id-core", "crates/minsec-id"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.87"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/minsecio/minsec-id"
 
@@ -21,6 +21,8 @@ clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 md-5 = "0.10"
 base64 = "0.22"
+aya = { version = "0.14", default-features = false }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "signal", "io-util", "sync", "macros"] }
 
 [profile.release]
 opt-level = "s"

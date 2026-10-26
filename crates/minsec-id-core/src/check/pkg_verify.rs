@@ -80,6 +80,8 @@ struct Run<'a> {
     sample_days: u64,
     verified: HashMap<u64, i64>,
     next_verified: HashMap<u64, i64>,
+    /// Path hashes the daemon saw written (`dirty.list`): hashed regardless.
+    dirty: std::collections::HashSet<u64>,
     out: Vec<Finding>,
     hashed: u64,
     bytes: u64,
@@ -200,7 +202,8 @@ impl Run<'_> {
         }
         let suspect = f.size.is_some_and(|s| v.has(Verify::SIZE) && s != md.size())
             || f.mtime.is_some_and(|t| v.has(Verify::MTIME) && t != md.mtime() as u64)
-            || (changed_since_install && self.verified.get(&key) != Some(&ctime_ns));
+            || (changed_since_install && self.verified.get(&key) != Some(&ctime_ns))
+            || self.dirty.contains(&key);
         let sampled = key % self.sample_days == (self.now / 86_400) % self.sample_days;
         if !(suspect || sampled || self.force) {
             if changed_since_install {
@@ -285,6 +288,7 @@ impl Check for PkgVerify {
 
     fn run(&self, ctx: &Ctx, _: &mut Anchors) -> anyhow::Result<Vec<Finding>> {
         let db = ctx.owned()?;
+        let claimed = crate::dirty::claim(&ctx.state_dir);
         let mut run = Run {
             host: ctx.host,
             force: false,
@@ -293,6 +297,7 @@ impl Check for PkgVerify {
             sample_days: ctx.cfg.scan.sample_days.max(1) as u64,
             verified: load_verified(&ctx.state_dir),
             next_verified: HashMap::new(),
+            dirty: claimed.paths.iter().map(|p| path_hash(p)).collect(),
             out: Vec::new(),
             hashed: 0,
             bytes: 0,
@@ -315,11 +320,13 @@ impl Check for PkgVerify {
             tracing::warn!("verified.bin: {e}");
         }
         tracing::info!(
-            "pkg-verify: {} paths, {} hashed ({} MiB)",
+            "pkg-verify: {} paths, {} hashed ({} MiB), {} written since the last full scan",
             total,
             run.hashed,
-            run.bytes >> 20
+            run.bytes >> 20,
+            claimed.paths.len()
         );
+        claimed.done();
         Ok(run.out)
     }
 }
@@ -346,6 +353,7 @@ pub fn verify(ctx: &Ctx, target: &str) -> anyhow::Result<VerifyReport> {
         sample_days: 1,
         verified: HashMap::new(),
         next_verified: HashMap::new(),
+        dirty: Default::default(),
         out: Vec::new(),
         hashed: 0,
         bytes: 0,

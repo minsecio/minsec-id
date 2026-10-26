@@ -99,7 +99,9 @@ pub struct CheckInfo {
     pub unavailable: Option<String>,
 }
 
+/// Checks, then the daemon's rules.
 pub fn checks(cfg: &Config, host: &Host) -> Vec<CheckInfo> {
+    let btf = host.exists("/sys/kernel/btf/vmlinux");
     check::all()
         .iter()
         .map(|c| {
@@ -113,6 +115,17 @@ pub fn checks(cfg: &Config, host: &Host) -> Vec<CheckInfo> {
                 unavailable: why,
             }
         })
+        .chain(crate::monitor::rules().iter().map(|r| {
+            let why = (!btf).then(|| "the kernel has no BTF (/sys/kernel/btf/vmlinux)".to_string());
+            CheckInfo {
+                id: r.id.into(),
+                description: r.description.into(),
+                cost: Cost::Daemon,
+                enabled: cfg.check_enabled(r.id, true),
+                available: why.is_none(),
+                unavailable: why,
+            }
+        }))
         .collect()
 }
 

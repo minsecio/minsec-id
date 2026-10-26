@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+minsec-id-bpf = { path = "../minsec-id-bpf" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

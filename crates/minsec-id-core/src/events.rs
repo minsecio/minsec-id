@@ -73,6 +73,7 @@ impl EventLog {
     }
 
     pub fn append(&mut self, ev: &Event) {
+        self.reopen_if_rotated();
         let Some(f) = self.file.as_mut() else { return };
         let mut line = match serde_json::to_string(ev) {
             Ok(s) => s,
@@ -86,6 +87,21 @@ impl EventLog {
         self.written += line.len() as u64;
         if self.written >= ROTATE_BYTES {
             self.rotate();
+        }
+    }
+
+    /// The scanner and the daemon both append; when one rotates the log,
+    /// the other's descriptor still points at the rotated file.
+    fn reopen_if_rotated(&mut self) {
+        use std::os::unix::fs::MetadataExt;
+        let Some(f) = self.file.as_ref() else { return };
+        let held = f.metadata().map(|m| (m.dev(), m.ino())).ok();
+        let now = std::fs::metadata(&self.path).map(|m| (m.dev(), m.ino())).ok();
+        if held != now {
+            if let Ok(f) = OpenOptions::new().create(true).append(true).open(&self.path) {
+                self.written = f.metadata().map(|m| m.len()).unwrap_or(0);
+                self.file = Some(f);
+            }
         }
     }
 

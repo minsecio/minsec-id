@@ -321,6 +321,57 @@ Phase 1 as built, where it differs from the plan above:
 **Phase 2 (eBPF daemon):** §3.6, the control socket, `dirty.list` handoff to the scanner,
 `proc-hidden` / `kmod-hidden` via bpf iterators, RSS and BPF map budget gates.
 
+Phase 2 as built, where it differs from the plan above:
+- **The daemon runs as root with a capability bounding set** (`CAP_BPF`,
+  `CAP_PERFMON`, `CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`), not as a
+  `minsec-id` user with ambient capabilities. It shares the state directory
+  and the findings log with the root scanner, and a separate user would only
+  move the trust to the file permissions.
+- **No libbpf headers and no generated `vmlinux.h`.** `bpf/vmlinux.h`
+  declares only the fields used, CO-RE-relocated at load; `bpf/helpers.h`
+  declares the dozen helpers. The build needs clang and nothing else. aya
+  0.14 needs Rust 1.87, so the MSRV moved from 1.85.
+- **Exec paths come from `bpf_d_path` at the exec's first file open**
+  (`fentry/security_file_open` with `__FMODE_EXEC` in `f_flags`; `f_mode`
+  only gets `FMODE_EXEC` later), picked up at `sched_process_exec`. A script
+  is reported by its own path, not its interpreter's.
+- **Unremarkable execs are cached in the kernel by inode** (`exec_ok`, an
+  LRU of 8,192), so steady-state execs never reach userspace. Any open of
+  the inode for writing evicts it.
+- **`exec-unowned` covers system paths only** (`/usr` but not `/usr/local`,
+  `/bin`, `/sbin`, `/lib*`, `/boot`). Everywhere else, unowned programs are
+  normal (builds, `~/.local/bin`). Ownership is a set of keyed path hashes
+  of package-owned executables and modules (8 bytes each), rebuilt when the
+  package database changes, rather than a dev+inode set.
+- **Writes are filtered in the kernel by superblock and root directory.**
+  The loader learns the superblocks of `/`, `/usr`, `/etc`, `/boot` and the
+  host's root dentry by opening them through `/proc/1/root` while the probe
+  watches its own opens. Writes by tasks with another root (containers,
+  chroots) are not reported. "Host" means pid 1's root directory, not its
+  mount namespace, because sandboxed services have a namespace of their own.
+  overlayfs opens each file twice; userspace drops the repeat.
+- **Package transactions are recognized by process ancestry** (rpm, dnf,
+  apt, dpkg, PackageKit, rpm-ostree, bootc, and Python-run dnf 4 and
+  unattended-upgrades), not by the rpm lock.
+- **Daemon findings are events, not open findings.** They are reported as
+  they happen, suppressed for `daemon.repeat` (1h), and appear in `events`
+  and the journal, not in `findings`.
+- **`priv-escalation` hooks `commit_creds`.** A setuid exec is told apart by
+  `security_bprm_committing_creds`, which runs just before it.
+- **`bpf-load`, `ptrace-attach`, and `kexec-load` report the request**
+  (syscall entry), whether or not it succeeds. `ptrace-attach` reports only
+  cross-uid attaches.
+- **`kmod-hidden` has no BPF view.** The kernel has no module iterator, so
+  only `proc-hidden` uses one (`iter/task`).
+- **Tested** on Fedora 44 (kernel 7.2), as root in a VM booted from the
+  host's kernel (`tests/vm/run.sh`, which needs only `/dev/kvm`), and on the
+  CI runner's kernel. Not yet tested: EL9's 5.14, and the systemd unit's
+  sandbox. `lockdown=confidentiality` forbids the kernel reads the probes
+  make.
+- **Measured** on a 3,400-package workstation: 2.2 MB anonymous memory
+  (5.7 MB RSS) once running, and about 1 MB of BPF maps. CI gates anonymous
+  memory at 5 MB. Start-up costs one read of the package database.
+
 **Phase 3 (more package formats and image-based systems):**
 - flatpak: `ostree fsck` on its repo, remote keys
 - snap: `snap known` assertions compared with the `.snap` sha3-384, hashed only on change

@@ -72,6 +72,24 @@ impl Default for Scan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct Daemon {
+    /// The same finding (same fingerprint) is reported again only after this long.
+    #[serde(default = "d_repeat")]
+    pub repeat: HumanDuration,
+}
+
+fn d_repeat() -> HumanDuration {
+    std::time::Duration::from_secs(3600).into()
+}
+
+impl Default for Daemon {
+    fn default() -> Self {
+        toml::from_str("").expect("defaults deserialize from empty table")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Paths {
     #[serde(default = "d_socket")]
     pub socket: PathBuf,
@@ -95,7 +113,7 @@ impl Default for Paths {
     }
 }
 
-/// Per-check overrides.
+/// Per-check (or daemon rule) overrides.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CheckConfig {
@@ -121,6 +139,8 @@ pub struct Config {
     pub output: Output,
     #[serde(default)]
     pub scan: Scan,
+    #[serde(default)]
+    pub daemon: Daemon,
     #[serde(default)]
     pub paths: Paths,
     #[serde(default)]
@@ -163,7 +183,7 @@ impl Config {
 
     fn validate(&self) -> anyhow::Result<()> {
         for id in self.checks.keys() {
-            if crate::check::get(id).is_none() {
+            if crate::check::get(id).is_none() && crate::monitor::rule(id).is_none() {
                 anyhow::bail!("checks.{id}: unknown check (see `minsec-id checks`)");
             }
         }
@@ -171,7 +191,7 @@ impl Config {
             let Some((check, subject)) = key.split_once(':') else {
                 anyhow::bail!("accept.\"{key}\": expected \"<check>:<subject>\"");
             };
-            if crate::check::producer(check).is_none() {
+            if crate::check::producer(check).is_none() && crate::monitor::rule_for(check).is_none() {
                 anyhow::bail!("accept.\"{key}\": unknown finding id `{check}`");
             }
             if subject.is_empty() {

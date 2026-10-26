@@ -179,6 +179,60 @@ fn unknown_names_are_errors() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn daemon_rules_are_listed_configured_and_accepted() {
+    let dir = temp_config();
+    let o = run(&dir, "clean", &["--json", "checks"]);
+    let list = json(&o);
+    let exec = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "exec")
+        .expect("the exec rule is listed");
+    assert_eq!(exec["cost"], "daemon");
+    assert_eq!(exec["enabled"], true);
+
+    assert!(run(&dir, "clean", &["disable", "exec"]).status.success());
+    let o = run(&dir, "clean", &["--json", "checks"]);
+    let exec = json(&o)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "exec")
+        .cloned()
+        .unwrap();
+    assert_eq!(exec["enabled"], false);
+    assert!(run(&dir, "clean", &["accept", "exec-memfd:/memfd:x"]).status.success());
+    // A finding id emitted by a check, not the check's own id.
+    assert!(run(&dir, "clean", &["accept", "persist-new:/etc/cron.d/x"])
+        .status
+        .success());
+    std::fs::write(
+        dir.join("conf.d/daemon.toml"),
+        "[daemon]
+repeat = \"10m\"\n",
+    )
+    .unwrap();
+    assert!(run(&dir, "clean", &["check"]).status.success());
+    // `daemon` is not a scan check.
+    assert_eq!(run(&dir, "clean", &["scan", "--check", "exec"]).status.code(), Some(1));
+
+    // No daemon: status says so rather than failing.
+    let sock = dir.join("none.sock");
+    std::fs::write(
+        dir.join("conf.d/sock.toml"),
+        format!("[paths]\nsocket = \"{}\"\n", sock.display()),
+    )
+    .unwrap();
+    let o = run(&dir, "clean", &["status"]);
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stdout).contains("daemon: not running"));
+    let o = run(&dir, "clean", &["--json", "status"]);
+    assert_eq!(json(&o)["daemon"]["running"], false);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Copy a fixture tree so a test can change it.
 fn mutable_fixture(name: &str) -> PathBuf {
     let dir = temp_config();

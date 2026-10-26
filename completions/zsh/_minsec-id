@@ -61,10 +61,11 @@ _minsec_id_commands() {
         'verify:Verify a file or package against the package database'
         'baseline:Show or reset the recorded baselines'
         'checks:List checks'
-        'enable:Enable a check'
-        'disable:Disable a check'
+        'enable:Enable a check or daemon rule'
+        'disable:Disable a check or daemon rule'
         'inspect:Report host capabilities, configuration sources, and checks'
         'check:Validate configuration'
+        'daemon:Run the eBPF monitor in the foreground'
         'events:Print the findings log'
         'help:Print help for a subcommand'
     )

@@ -17,7 +17,7 @@ const SHELLS: &[&str] = &[
     "nc", "ncat", "netcat", "socat", "telnet", "openssl",
 ];
 
-fn is_shell(exe: &str) -> bool {
+pub(crate) fn is_shell(exe: &str) -> bool {
     let base = exe.rsplit('/').next().unwrap_or(exe);
     SHELLS.contains(&base) || base.starts_with("python") || base.starts_with("php") || base.starts_with("perl5")
 }
