@@ -1,0 +1,11 @@
+[Unit]
+Description=minsec-id quick scan every 30 minutes
+Documentation=https://github.com/minsecio/minsec-id
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
