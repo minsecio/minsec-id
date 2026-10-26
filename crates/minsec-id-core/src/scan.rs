@@ -109,6 +109,7 @@ pub fn run(cfg: &Config, opts: &Options) -> anyhow::Result<Report> {
     });
     let mut log = EventLog::open(&cfg.events_file())?;
     let ctx = Ctx::new(&opts.host, cfg, ts);
+    let crowd = crate::crowd::Crowd::load(&cfg.paths.state_dir);
 
     let mut runs = Vec::new();
     let mut errors = BTreeMap::new();
@@ -171,6 +172,7 @@ pub fn run(cfg: &Config, opts: &Options) -> anyhow::Result<Report> {
             if let Some(s) = cfg.severity_override(id) {
                 f.severity = s;
             }
+            crowd.annotate(&mut f);
             let accepted = cfg.accepted(&f).map(|(k, _)| k.to_string());
             seen.insert(f.fingerprint.clone());
             match state.open.get_mut(&f.fingerprint) {

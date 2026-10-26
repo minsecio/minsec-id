@@ -1,0 +1,43 @@
+[Unit]
+Description=minsec-id crowd sync (finding counts, hash checks of modified package files)
+Documentation=man:minsec-id-sync(1) https://github.com/minsecio/minsec-id
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Exits 0 immediately when /etc/minsec-id/sync.toml does not exist (opt-in).
+ExecStart=/usr/bin/minsec-id-sync run
+
+# Root without capabilities: it reads the scanner's state.json (root,
+# 0600) as its owner and writes nothing but its own sync directory. No
+# capability, so no reading other files past their permissions either.
+CapabilityBoundingSet=
+NoNewPrivileges=true
+ConfigurationDirectory=minsec-id
+# ProtectSystem=strict leaves everything else read-only. The directory is
+# made by tmpfiles (minsec-id.conf).
+ReadWritePaths=/var/lib/minsec-id/sync
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+Environment=MALLOC_ARENA_MAX=1
+MemoryMax=64M

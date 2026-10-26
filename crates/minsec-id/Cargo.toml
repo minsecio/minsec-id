@@ -35,25 +35,36 @@ minsec-id checks a Linux host for signs of intrusion using what the system \
 already knows: the package manager's file digests, kernel taint and security \
 state, and (optionally) eBPF. No file-hash database and nothing resident by \
 default; scans run from a systemd timer. The eBPF monitor \
-(minsec-id.service) is installed but not enabled."""
+(minsec-id.service) is installed but not enabled. Includes minsec-id-sync, the \
+opt-in crowd client (enable by creating /etc/minsec-id/sync.toml)."""
 section = "admin"
 priority = "optional"
 depends = "libc6 (>= 2.34), systemd"
 suggests = "bash-completion"
 assets = [
   ["target/release/minsec-id", "usr/bin/", "755"],
+  ["target/release/minsec-id-sync", "usr/bin/", "755"],
   ["../../packaging/minsec-id.toml", "etc/minsec-id/minsec-id.toml", "644"],
   ["../../packaging/minsec-id.service", "lib/systemd/system/minsec-id.service", "644"],
   ["../../packaging/minsec-id-scan.service", "lib/systemd/system/minsec-id-scan.service", "644"],
   ["../../packaging/minsec-id-scan.timer", "lib/systemd/system/minsec-id-scan.timer", "644"],
   ["../../packaging/minsec-id-scan-full.service", "lib/systemd/system/minsec-id-scan-full.service", "644"],
   ["../../packaging/minsec-id-scan-full.timer", "lib/systemd/system/minsec-id-scan-full.timer", "644"],
+  ["../../packaging/minsec-id-sync.service", "lib/systemd/system/minsec-id-sync.service", "644"],
+  ["../../packaging/minsec-id-sync.timer", "lib/systemd/system/minsec-id-sync.timer", "644"],
   ["../../packaging/minsec-id.tmpfiles.conf", "usr/lib/tmpfiles.d/minsec-id.conf", "644"],
   ["../../docs/man/minsec-id.1", "usr/share/man/man1/minsec-id.1", "644"],
   ["../../docs/man/minsec-id.toml.5", "usr/share/man/man5/minsec-id.toml.5", "644"],
+  ["../../docs/man/minsec-id-sync.1", "usr/share/man/man1/minsec-id-sync.1", "644"],
   ["../../completions/bash/minsec-id", "usr/share/bash-completion/completions/minsec-id", "644"],
   ["../../completions/zsh/_minsec-id", "usr/share/zsh/vendor-completions/_minsec-id", "644"],
   ["../../completions/fish/minsec-id.fish", "usr/share/fish/vendor_completions.d/minsec-id.fish", "644"],
+  ["../../completions/bash/minsec-id-sync", "usr/share/bash-completion/completions/minsec-id-sync", "644"],
+  ["../../completions/zsh/_minsec-id-sync", "usr/share/zsh/vendor-completions/_minsec-id-sync", "644"],
+  ["../../completions/fish/minsec-id-sync.fish", "usr/share/fish/vendor_completions.d/minsec-id-sync.fish", "644"],
+  # Shipped as documentation, never installed to /etc: the file's existence
+  # is the opt-in.
+  ["../../packaging/sync.toml", "usr/share/doc/minsec-id/sync.toml.example", "644"],
   ["../../README.md", "usr/share/doc/minsec-id/README.md", "644"],
   ["../../docs/PLAN.md", "usr/share/doc/minsec-id/PLAN.md", "644"],
 ]
@@ -70,18 +81,26 @@ pre_uninstall_script = "../../packaging/rpm/preun.sh"
 post_uninstall_script = "../../packaging/rpm/postun.sh"
 assets = [
   { source = "target/release/minsec-id", dest = "/usr/bin/minsec-id", mode = "755" },
+  { source = "target/release/minsec-id-sync", dest = "/usr/bin/minsec-id-sync", mode = "755" },
   { source = "packaging/minsec-id.toml", dest = "/etc/minsec-id/minsec-id.toml", mode = "644", config = "noreplace" },
   { source = "packaging/minsec-id.service", dest = "/usr/lib/systemd/system/minsec-id.service", mode = "644" },
   { source = "packaging/minsec-id-scan.service", dest = "/usr/lib/systemd/system/minsec-id-scan.service", mode = "644" },
   { source = "packaging/minsec-id-scan.timer", dest = "/usr/lib/systemd/system/minsec-id-scan.timer", mode = "644" },
   { source = "packaging/minsec-id-scan-full.service", dest = "/usr/lib/systemd/system/minsec-id-scan-full.service", mode = "644" },
   { source = "packaging/minsec-id-scan-full.timer", dest = "/usr/lib/systemd/system/minsec-id-scan-full.timer", mode = "644" },
+  { source = "packaging/minsec-id-sync.service", dest = "/usr/lib/systemd/system/minsec-id-sync.service", mode = "644" },
+  { source = "packaging/minsec-id-sync.timer", dest = "/usr/lib/systemd/system/minsec-id-sync.timer", mode = "644" },
   { source = "packaging/minsec-id.tmpfiles.conf", dest = "/usr/lib/tmpfiles.d/minsec-id.conf", mode = "644" },
   { source = "docs/man/minsec-id.1", dest = "/usr/share/man/man1/minsec-id.1", mode = "644", doc = true },
   { source = "docs/man/minsec-id.toml.5", dest = "/usr/share/man/man5/minsec-id.toml.5", mode = "644", doc = true },
+  { source = "docs/man/minsec-id-sync.1", dest = "/usr/share/man/man1/minsec-id-sync.1", mode = "644", doc = true },
   { source = "completions/bash/minsec-id", dest = "/usr/share/bash-completion/completions/minsec-id", mode = "644" },
   { source = "completions/zsh/_minsec-id", dest = "/usr/share/zsh/site-functions/_minsec-id", mode = "644" },
   { source = "completions/fish/minsec-id.fish", dest = "/usr/share/fish/vendor_completions.d/minsec-id.fish", mode = "644" },
+  { source = "completions/bash/minsec-id-sync", dest = "/usr/share/bash-completion/completions/minsec-id-sync", mode = "644" },
+  { source = "completions/zsh/_minsec-id-sync", dest = "/usr/share/zsh/site-functions/_minsec-id-sync", mode = "644" },
+  { source = "completions/fish/minsec-id-sync.fish", dest = "/usr/share/fish/vendor_completions.d/minsec-id-sync.fish", mode = "644" },
+  { source = "packaging/sync.toml", dest = "/usr/share/doc/minsec-id/sync.toml.example", mode = "644", doc = true },
   { source = "README.md", dest = "/usr/share/doc/minsec-id/README.md", mode = "644", doc = true },
   { source = "docs/PLAN.md", dest = "/usr/share/doc/minsec-id/PLAN.md", mode = "644", doc = true },
   { source = "LICENSE", dest = "/usr/share/licenses/minsec-id/LICENSE", mode = "644", doc = true },

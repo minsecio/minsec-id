@@ -54,6 +54,13 @@ reject kernel-tainted 'enable skips enabled checks' minsec-id -c "$work/conf" en
 expect critical 'severity values' minsec-id findings --severity cr
 expect account-uid0:toor 'accept offers open findings' minsec-id -c "$work/conf" accept acc
 
-if command -v zsh >/dev/null; then zsh -n "$repo/completions/zsh/_minsec-id" && echo "ok   zsh syntax"; fi
-if command -v fish >/dev/null; then fish -n "$repo/completions/fish/minsec-id.fish" && echo "ok   fish syntax"; fi
+bash -n "$repo/completions/bash/minsec-id-sync" && echo "ok   bash syntax (minsec-id-sync)"
+if command -v zsh >/dev/null; then
+    zsh -n "$repo/completions/zsh/_minsec-id" && echo "ok   zsh syntax"
+    zsh -n "$repo/completions/zsh/_minsec-id-sync" && echo "ok   zsh syntax (minsec-id-sync)"
+fi
+if command -v fish >/dev/null; then
+    fish -n "$repo/completions/fish/minsec-id.fish" && echo "ok   fish syntax"
+    fish -n "$repo/completions/fish/minsec-id-sync.fish" && echo "ok   fish syntax (minsec-id-sync)"
+fi
 exit $fail

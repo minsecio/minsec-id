@@ -51,19 +51,21 @@ shells=("$shell")
 [[ $shell != all ]] || shells=(bash zsh fish)
 # Check every input before installing anything.
 for selected in "${shells[@]}"; do
-    case "$selected" in
-        bash) filename=minsec-id; directory=$bash_dir ;;
-        zsh) filename=_minsec-id; directory=$zsh_dir ;;
-        fish) filename=minsec-id.fish; directory=$fish_dir ;;
-    esac
-    [[ $directory == /* ]] || die "completion directories must be absolute: $directory"
-    [[ -s "$source_dir/$selected/$filename" ]] || die "missing $source_dir/$selected/$filename"
+    for command in minsec-id minsec-id-sync; do
+        case "$selected" in
+            bash) filename=$command; directory=$bash_dir ;;
+            zsh) filename=_$command; directory=$zsh_dir ;;
+            fish) filename=$command.fish; directory=$fish_dir ;;
+        esac
+        [[ $directory == /* ]] || die "completion directories must be absolute: $directory"
+        [[ -s "$source_dir/$selected/$filename" ]] || die "missing $source_dir/$selected/$filename"
+    done
 done
 for selected in "${shells[@]}"; do
     case "$selected" in
-        bash) directory=$bash_dir; files=(minsec-id) ;;
-        zsh) directory=$zsh_dir; files=(_minsec-id) ;;
-        fish) directory=$fish_dir; files=(minsec-id.fish) ;;
+        bash) directory=$bash_dir; files=(minsec-id minsec-id-sync) ;;
+        zsh) directory=$zsh_dir; files=(_minsec-id _minsec-id-sync) ;;
+        fish) directory=$fish_dir; files=(minsec-id.fish minsec-id-sync.fish) ;;
     esac
     install -d -m 0755 -- "$stage$directory"
     for filename in "${files[@]}"; do
@@ -75,7 +77,7 @@ if [[ -z $stage ]]; then
     if [[ $shell == all || $shell == bash ]]; then
         echo "Bash: enable bash-completion, then start a new shell."
         echo "For this shell (also works with paths containing spaces):"
-        printf '  source %q\n' "$bash_dir/minsec-id"
+        printf '  source %q\n  source %q\n' "$bash_dir/minsec-id" "$bash_dir/minsec-id-sync"
     fi
     if [[ $shell == all || $shell == zsh ]]; then
         printf 'Zsh: ensure %q is on fpath before running compinit.\n' "$zsh_dir"

@@ -1,0 +1,46 @@
+#compdef minsec-id-sync
+
+# Zsh completion for minsec-id-sync. All values are static.
+
+_minsec-id-sync_commands() {
+    local -a commands=(
+        'enroll:Generate a key (first run) and enroll with the server'
+        'report:Report open finding counts (also the heartbeat)'
+        'check:Ask the crowd about modified package files'
+        'run:Enroll if needed, report, then check'
+        'status:Show enrollment and crowd state'
+        'help:Print help for a subcommand'
+    )
+    _describe -t commands 'minsec-id-sync command' commands
+}
+
+_minsec-id-sync() {
+    local curcontext=$curcontext state line ret=1
+    typeset -A opt_args
+    local -a global_opts=(
+        '(-c --config)'{-c,--config}'[Configuration file]:file:_files'
+        '(- : *)'{-h,--help}'[Print help]'
+    )
+
+    _arguments -C $global_opts \
+        '(- : *)'{-V,--version}'[Print version]' \
+        '1: :_minsec-id-sync_commands' \
+        '*::: :->args' && ret=0
+
+    case $state in
+        args)
+            # $words now holds only the words after the subcommand; put the
+            # subcommand back so the nested _arguments sees a full command line.
+            words=($line[1] "${words[@]}")
+            ((CURRENT++))
+            curcontext=${curcontext%:*:*}:minsec-id-sync-$line[1]:
+            case $line[1] in
+                help) _arguments '1: :_minsec-id-sync_commands' && ret=0 ;;
+                *) _arguments $global_opts && ret=0 ;;
+            esac
+            ;;
+    esac
+    return ret
+}
+
+_minsec-id-sync "$@"
