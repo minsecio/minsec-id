@@ -502,6 +502,53 @@ an organization; per-organization views of hosts, heartbeats, and finding
 counts in the operator console; missed-heartbeat alerts (a host that stops
 reporting is the tell for a silenced agent) by webhook or mail.
 
+### Phase 4b as built
+
+- **Organizations live in the operator console**, not a customer portal:
+  minsec.io staff create them, mint install tokens, set alert destinations,
+  and read each fleet's hosts, findings and alerts. Customers receive alerts
+  and tokens. A customer-facing portal (accounts, logins) is later work; it
+  must restrict webhook destinations, which today only operators set.
+- **Install tokens** (`minsec_` + 32 random bytes, stored as sha256, shown
+  once) are minted in the console or with `minsecd admin org token`, may
+  expire or be limited to a number of hosts, and are revocable; revoking
+  one leaves the hosts it enrolled in place. A valid token moves enrollment
+  challenges from the per-address limit (5/hour) to a per-token one
+  (1000/hour), so a fleet behind one NAT address can enroll at once.
+- **Binding is for the life of an enrollment.** `install_token` in
+  `sync.toml` enrolls into the organization; added to a host enrolled
+  anonymously, it re-enrolls once with a new key (`key.old` kept), and the
+  anonymous identity goes quiet. Both minsec-sync and minsec-id-sync do
+  this; heartbeat alerts are for minsec-id hosts, which report hourly
+  whatever happens (a quiet minsec host may simply have banned nothing).
+- **Labels** (default: the hostname; `[A-Za-z0-9._-]`, ≤ 64) are sent and
+  stored only for hosts in an organization: anonymous hosts still send
+  nothing that names them. Findings reports keep the label current.
+- **An organization is one voter.** In hash checks and in ban scoring, every
+  host of one organization counts once, wherever it runs: a fleet is one
+  administrator, and its identical hosts are not independent witnesses.
+- **Alerts:** a minute-interval job (one replica at a time, by advisory
+  lock) opens one alert per host quiet past its organization's timeout
+  (default 3 h, 1–168 h), resolves it on the next report (or as retired
+  when the host is revoked or the organization disabled, without
+  notifying), and delivers each transition per channel with backoff (1 m ×
+  4ⁿ, capped at 6 h, eight attempts). Webhooks are https only, never follow
+  redirects, and are signed `X-Minsec-Alert-Signature: t=…,v1=hex(HMAC-SHA256
+  (secret, "t.body"))`; the body's `text` is a one-line summary that chat
+  services' incoming webhooks show as is. Mail goes through an SMTP relay
+  with STARTTLS or TLS (plain only to a loopback relay); without one,
+  addresses are not queued.
+- **Verification:** backend tests for token enrollment (limits, expiry,
+  revocation, disabled organizations, unsafe labels), per-token rate
+  limiting, an organization counting once in hash checks and scoring, the
+  alert job against a local HTTPS receiver and a fake SMTP relay (signature,
+  no repeats, recovery, retirement, retry and give-up), and the console
+  (tokens shown once and never in a URL, settings validation, retiring
+  only the organization's own hosts). `tests/e2e-sync.sh` gained token
+  enrollment, labels, joining, one-vote-per-organization and an alert
+  opening and resolving against a real `minsecd`; minsec's
+  `tests/e2e-multiplayer.sh` gained the join.
+
 **Phase 5 (response):** opt-in BPF-LSM enforcement policies (deny exec from tmpfs or memfd, deny
 module loads after boot, deny unexpected BPF loads), correlation with minsec (SSH source IP of the
 session that spawned a flagged process), and IMA/TPM attestation via minsec.io.

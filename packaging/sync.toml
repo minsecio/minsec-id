@@ -32,3 +32,11 @@
 # Packages never named in a hash check: globs over the package id, where *
 # matches anything.
 #exclude = ["acme-*"]
+
+# Fleet management: an organization's install token enrolls this host into
+# its fleet on minsec.io, where it is watched for missed heartbeats and
+# named by its label (default: the hostname). A host already enrolled
+# anonymously enrolls again with a new key. Keep this file mode 0600 when
+# it holds a token.
+#install_token = "minsec_..."
+#label = "web1"

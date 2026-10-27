@@ -47,7 +47,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let api = Api::new(&cfg.server);
 
     match cli.cmd {
-        Cmd::Enroll => enroll(&api, &store, &mut state, true)?,
+        Cmd::Enroll => enroll(&cfg, &api, &store, &mut state, true)?,
         Cmd::Report => {
             let key = store.load_or_create_key()?;
             let out = findings::run(&cfg, &api, &store, &mut state, &key)?;
@@ -58,9 +58,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             print_check(&hashcheck::run(&cfg, &api, &state, &key)?, true);
         }
         Cmd::Run => {
-            if state.host_id.is_none() {
-                enroll(&api, &store, &mut state, false)?;
-            }
+            enroll(&cfg, &api, &store, &mut state, false)?;
             let key = store.load_or_create_key()?;
             let mut failed = None;
             if cfg.findings {
@@ -90,6 +88,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 Some(id) => println!("host_id:  {id}"),
                 None => println!("host_id:  (not enrolled)"),
             }
+            if let Some(org) = &state.org {
+                println!("org:      {org}");
+                if let Some(label) = cfg.label() {
+                    println!("label:    {label}");
+                }
+            }
             println!("seq:      {}", state.next_seq);
             let crowd = minsec_id_core::crowd::Crowd::load(&cfg.state_dir);
             let shared = crowd.answers.values().filter(|a| a.verdict == "shared").count();
@@ -115,20 +119,36 @@ fn print_check(o: &hashcheck::Outcome, always: bool) {
     );
 }
 
-/// Enroll as minsec-id, solving the proof-of-work challenge. With `verbose`
-/// (interactive use) progress goes to stdout. If the server knows the key
-/// but this host lost its host_id, the key is rotated and enrollment retried
-/// once.
-fn enroll(api: &Api, store: &Store, state: &mut store::State, verbose: bool) -> anyhow::Result<()> {
-    if let Some(id) = &state.host_id {
-        if verbose {
-            println!("already enrolled as {id}");
+/// Enroll as minsec-id, solving the proof-of-work challenge, unless
+/// already enrolled. With `verbose` (interactive use) progress goes to
+/// stdout. If the server knows the key but this host lost its host_id, the
+/// key is rotated and enrollment retried once.
+///
+/// An install token added to a host enrolled anonymously joins it to the
+/// organization: the host enrolls again with a new key, and the anonymous
+/// enrollment is left to go quiet.
+fn enroll(cfg: &Config, api: &Api, store: &Store, state: &mut store::State, verbose: bool) -> anyhow::Result<()> {
+    let token = cfg.token();
+    let joining = match (&state.host_id, &state.org, token) {
+        (Some(id), None, Some(_)) if !state.token_enrolled => Some(id.clone()),
+        (Some(id), _, _) => {
+            if verbose {
+                println!("already enrolled as {id}");
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
+        _ => None,
+    };
     let mut key = store.load_or_create_key()?;
     for attempt in 0..2 {
-        let ch = api.challenge()?;
+        // A bad token is refused here, before the anonymous identity is
+        // given up.
+        let ch = api.challenge(token)?;
+        if let (Some(id), 0) = (&joining, attempt) {
+            eprintln!("minsec-id-sync: install_token set; re-enrolling {id} into the organization with a new key");
+            state.host_id = None;
+            key = store.rotate_key()?;
+        }
         if verbose {
             println!("solving {POW_ALGO} challenge (difficulty {})...", ch.difficulty);
         }
@@ -138,16 +158,25 @@ fn enroll(api: &Api, store: &Store, state: &mut store::State, verbose: bool) -> 
             pow_nonce: nonce,
             pubkey: B64.encode(key.verifying_key().to_bytes()),
             agent_version: AGENT_VERSION.to_string(),
-            install_token: None,
+            install_token: token.map(str::to_string),
+            label: token.and_then(|_| cfg.label()),
             product: Some(PRODUCT_MINSEC_ID.into()),
         };
         match api.enroll(&req) {
             Ok(resp) => {
                 state.host_id = Some(resp.host_id.clone());
+                state.org = resp.org.clone();
+                state.token_enrolled = token.is_some();
                 state.min_report_interval = resp.min_report_interval;
                 store.save_state(state)?;
+                if token.is_some() && resp.org.is_none() {
+                    eprintln!("minsec-id-sync: the server did not bind this host to an organization");
+                }
                 if verbose {
-                    println!("enrolled as {}", resp.host_id);
+                    match &resp.org {
+                        Some(org) => println!("enrolled as {} in {org}", resp.host_id),
+                        None => println!("enrolled as {}", resp.host_id),
+                    }
                 }
                 return Ok(());
             }

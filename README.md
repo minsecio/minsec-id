@@ -22,11 +22,11 @@ for the design and roadmap.
 
 ## Status
 
-Phase 4: the scanner, the optional eBPF daemon, support for flatpak, snap,
+Phase 4b: the scanner, the optional eBPF daemon, support for flatpak, snap,
 image-based systems (ostree, bootc, composefs), system extensions, and IMA,
-and the opt-in crowd client for minsec.io are complete. Fleet management
-(organizations, missed-heartbeat alerts) is next; see
-[docs/PLAN.md](docs/PLAN.md).
+the opt-in crowd client for minsec.io, and fleet management (organizations,
+missed-heartbeat alerts) are complete. Response (opt-in BPF-LSM enforcement)
+is next; see [docs/PLAN.md](docs/PLAN.md).
 
 ## Checks
 
@@ -171,6 +171,14 @@ sudo cp /usr/share/doc/minsec-id/sync.toml.example /etc/minsec-id/sync.toml
 sudo minsec-id-sync run
 sudo minsec-id-sync status
 ```
+
+**Fleets.** With an organization's `install_token` in `sync.toml`, a host
+enrolls into that organization's fleet on minsec.io under a `label` (the
+hostname by default). The organization sees its hosts' heartbeats and
+finding counts, and is alerted by webhook or mail when a host stops
+reporting: on a compromised machine, a silenced agent is the tell. Its hosts
+count once toward the crowd's quorum, however many there are. Hosts without
+a token stay anonymous.
 
 See `minsec-id-sync(1)` and https://minsec.io/privacy.
 

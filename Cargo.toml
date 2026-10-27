@@ -26,7 +26,7 @@ aya = { version = "0.14", default-features = false }
 ed25519-dalek = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 # The minsec.io wire protocol, shared with minsec's own sync client.
-minsec-proto = { git = "https://github.com/minsecio/minsec", rev = "24efa9e9ab8a115568befbc1ae1091e2f0a41fa8" }
+minsec-proto = { git = "https://github.com/minsecio/minsec", rev = "a2bc30282125d7aa6d7f156e3d5a6d876c910deb" }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "signal", "io-util", "sync", "macros"] }
 
 [profile.release]

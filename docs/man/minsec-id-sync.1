@@ -43,7 +43,15 @@ Create an Ed25519 signing key if necessary, solve the server's enrollment
 proof-of-work challenge, and save the assigned host ID.
 The host enrolls as a minsec-id agent: its key can submit findings and hash
 checks and nothing else.
-If this state is already present, print the existing host ID and return.
+With
+.BR install_token ,
+the host enrolls into the organization that issued it, under its
+.BR label .
+If this state is already present, print the existing host ID and return,
+unless an install token has been added to a host enrolled anonymously: then
+the key is moved to
+.I key.old
+and the host enrolls again, into the organization, once.
 If the local host ID was lost but the server already knows the key, the key
 is moved to
 .I key.old
@@ -57,7 +65,8 @@ release (os-release
 and
 .BR VERSION_ID ).
 It never carries a finding's subject, message, or detail.
-Each report is also the host's heartbeat.
+Each report is also the host's heartbeat; a host in an organization also
+sends its current label.
 .SS check
 For each open
 .B pkg-modified
@@ -103,8 +112,8 @@ This absent-file behavior is specific to
 .BR run ;
 the other commands report an error.
 .SS status
-Print the configured server, public key, host ID, next report sequence
-number, and how many crowd answers are on file.
+Print the configured server, public key, host ID, organization, next
+report sequence number, and how many crowd answers are on file.
 A key is generated if one does not already exist.
 .SH CONFIGURATION
 .I /etc/minsec-id/sync.toml
@@ -135,6 +144,40 @@ Package ids never sent in a hash check: globs where
 .B *
 matches anything, such as
 .BR \(dqacme-*\(dq .
+.TP
+.BR install_token " (default none)"
+An organization's install token, for fleet management on minsec.io.
+The host's reports then appear in the organization's fleet views, a host
+that stops reporting raises a missed-heartbeat alert to the organization,
+and its hash checks count once per organization, not once per network.
+The token is a secret: keep the file readable by root only.
+.TP
+.BR label " (default the hostname)"
+The host's name in its organization's fleet views and alerts: letters,
+digits,
+.BR . ,
+.B _
+and
+.BR - ,
+at most 64 characters; other characters are dropped.
+.B \(dq\(dq
+sends none.
+Sent only by a host in, or joining, an organization.
+.SH FLEETS
+An organization is a minsec.io customer's set of hosts.
+Its install tokens are minted by minsec.io; each may expire or be limited to
+a number of hosts.
+A host enrolled with one is bound to the organization for the life of its
+enrollment, and is the only kind of host that sends a label.
+Hosts enrolled without a token are anonymous: nothing links them to each
+other or to an owner.
+.PP
+A host that has not reported for the organization's heartbeat timeout
+(three hours by default; reports are hourly) is reported to the
+organization by webhook or mail, and so is its next report.
+On a compromised host, an agent that stops reporting is what an intruder
+silencing it looks like.
+A decommissioned host is retired by minsec.io so it stops being watched.
 .SH OPERATION
 The packaged
 .B minsec-id-sync.timer

@@ -47,6 +47,7 @@ pub fn build(scan: &ScanState, since: u64, os: OsInfo) -> FindingsReport {
         os,
         checks: scan.last_scan.as_ref().map(|l| l.checks.clone()).unwrap_or_default(),
         counts: counts.into_values().collect(),
+        label: None,
     }
 }
 
@@ -60,6 +61,10 @@ pub fn run(cfg: &Config, api: &Api, store: &Store, st: &mut State, key: &Signing
     let scan = ScanState::load(&cfg.state_dir.join("state.json"))?;
     let mut rep = build(&scan, st.last_report, crate::os::release());
     rep.seq = st.next_seq.max(now_unix());
+    // A host in an organization keeps its fleet name current.
+    if st.org.is_some() {
+        rep.label = cfg.label();
+    }
     let mut resp: FindingsResponse = api.post_signed(
         "/v1/findings",
         minsec_proto::sign::PURPOSE_FINDINGS,

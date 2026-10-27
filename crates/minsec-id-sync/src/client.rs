@@ -103,12 +103,15 @@ impl Api {
         })
     }
 
-    pub fn challenge(&self) -> anyhow::Result<types::Challenge> {
+    pub fn challenge(&self, install_token: Option<&str>) -> anyhow::Result<types::Challenge> {
+        let req = types::ChallengeRequest {
+            install_token: install_token.map(str::to_string),
+        };
         let resp = self
             .agent
             .post(self.url("/v1/enroll/challenge"))
             .header("Content-Type", "application/json")
-            .send("{}")
+            .send(serde_json::to_string(&req).expect("serializable"))
             .map_err(transport)?;
         let ch: types::Challenge = Self::read(resp)?;
         if ch.algo != types::POW_ALGO {

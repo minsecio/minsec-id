@@ -13,6 +13,14 @@ use std::path::{Path, PathBuf};
 pub struct State {
     #[serde(default)]
     pub host_id: Option<String>,
+    /// The organization an install token enrolled this host into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org: Option<String>,
+    /// This enrollment was made with an install token, whether or not the
+    /// server bound it to an organization: an anonymous enrollment is
+    /// re-enrolled with a token once, never in a loop.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token_enrolled: bool,
     /// Next findings report sequence number (see findings.rs).
     #[serde(default)]
     pub next_seq: u64,
@@ -93,12 +101,19 @@ mod tests {
             next_seq: 9,
             last_report: 7,
             min_report_interval: 3600,
+            org: Some("Acme".into()),
+            ..Default::default()
         };
         store.save_state(&st).unwrap();
         let back = store.load_state().unwrap();
         assert_eq!(
-            (back.host_id.as_deref(), back.next_seq, back.last_report),
-            (Some("h"), 9, 7)
+            (
+                back.host_id.as_deref(),
+                back.next_seq,
+                back.last_report,
+                back.org.as_deref()
+            ),
+            (Some("h"), 9, 7, Some("Acme"))
         );
         let k = store.load_or_create_key().unwrap();
         assert_eq!(k.to_bytes(), store.load_or_create_key().unwrap().to_bytes());

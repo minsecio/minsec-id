@@ -570,7 +570,7 @@ dependencies = [
 [[package]]
 name = "minsec-proto"
 version = "0.2.6"
-source = "git+https://github.com/minsecio/minsec?rev=24efa9e9ab8a115568befbc1ae1091e2f0a41fa8#24efa9e9ab8a115568befbc1ae1091e2f0a41fa8"
+source = "git+https://github.com/minsecio/minsec?rev=a2bc30282125d7aa6d7f156e3d5a6d876c910deb#a2bc30282125d7aa6d7f156e3d5a6d876c910deb"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",

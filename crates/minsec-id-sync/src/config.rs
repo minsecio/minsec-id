@@ -26,6 +26,13 @@ pub struct Config {
     /// Packages never named in a hash check: globs over the package id,
     /// where `*` matches anything (`oneleet-*`, `*.local.*`).
     pub exclude: Vec<String>,
+    /// An organization's install token: enrolls this host into its fleet
+    /// on minsec.io. Adding one to a host enrolled anonymously re-enrolls
+    /// it.
+    pub install_token: Option<String>,
+    /// The host's name in the organization's fleet views and alerts
+    /// (default: the hostname). Sent only with an install token.
+    pub label: Option<String>,
 }
 
 impl Default for Config {
@@ -37,6 +44,8 @@ impl Default for Config {
             hashcheck: true,
             unsigned: false,
             exclude: Vec::new(),
+            install_token: None,
+            label: None,
         }
     }
 }
@@ -54,7 +63,23 @@ impl Config {
         if !cfg.server.starts_with("http://") && !cfg.server.starts_with("https://") {
             anyhow::bail!("{}: server must be an http(s) URL", path.display());
         }
+        if cfg.install_token.as_deref().is_some_and(|t| t.trim().is_empty()) {
+            anyhow::bail!("{}: install_token is empty", path.display());
+        }
         Ok(Some(cfg))
+    }
+
+    pub fn token(&self) -> Option<&str> {
+        self.install_token.as_deref().map(str::trim)
+    }
+
+    /// The host's label: the configured one, or the hostname. `label =
+    /// ""` gives none. Sent only by a host joining or in an organization.
+    pub fn label(&self) -> Option<String> {
+        match &self.label {
+            Some(l) => minsec_proto::types::sanitize_label(l),
+            None => minsec_proto::types::host_label(),
+        }
     }
 
     pub fn excluded(&self, package: &str) -> bool {
@@ -94,6 +119,17 @@ mod tests {
         assert!(cfg.excluded("acme-agent-1.0-1.x86_64"));
         assert!(!cfg.excluded("coreutils-9.5-1.fc44.x86_64"));
         assert!(toml::from_str::<Config>("hashchek = false\n").is_err());
+    }
+
+    #[test]
+    fn labels() {
+        let cfg: Config = toml::from_str("label = \"web1\"\n").unwrap();
+        assert_eq!(cfg.label().as_deref(), Some("web1"));
+        let cfg: Config = toml::from_str("install_token = \" t \"\nlabel = \"web 1\"\n").unwrap();
+        assert_eq!(cfg.label().as_deref(), Some("web1"));
+        assert_eq!(cfg.token(), Some("t"));
+        let cfg: Config = toml::from_str("install_token = \"t\"\nlabel = \"\"\n").unwrap();
+        assert_eq!(cfg.label(), None);
     }
 
     #[test]
